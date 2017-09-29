@@ -1,0 +1,18 @@
+<launch>
+  <node pkg="mediation_layer"
+    type="mediation_layer"
+    name="medation_layer"
+    output="screen">
+
+    <param name="kforce" value=".05"/>
+    <param name="numquads" value="2"/>
+
+    <param name="quadPoseTopic_1" type="string" value="Valkyrie/pose"/> <!-- MUST USE GLOBAL FRAME -->
+    <param name="quadPVAListenTopic_1" type="string" value="px4_control/PVA_Ref"/>
+    <param name="quadPVAPublish_1" type="string" value="px4_control/PVA_Ref_2"/>
+    <param name="quadPoseTopic_2" type="string" value="Valkyrie/pose"/>
+    <param name="quadPVAListenTopic_2" type="string" value="px4_control/PVA_Ref_3"/>
+    <param name="quadPVAPublish_2" type="string" value="px4_control/PVA_Ref_4"/>
+
+  </node>
+</launch>
