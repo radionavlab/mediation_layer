@@ -1,5 +1,6 @@
 #pragma once
 
+//this #define may interrupt ROS compilation
 //#define _GLIBCXX_USE_CXX11_ABI 0 //necessary because of std::__cxx11::string error
 
 #include <ros/ros.h>
@@ -45,6 +46,7 @@ public:
 
 	void poseCallback(const ros::MessageEvent<nav_msgs::Odometry const>& event);
 	void pvaCallback(const ros::MessageEvent<px4_control::PVA const>& event);
+    Eigen::Vector3d unitVector(const Eigen::Vector3d);
 
     int indexOfMatchingString(const std::string (&stringmat)[10], const int listlen, const std::string &matchstring);
 

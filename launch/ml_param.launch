@@ -7,10 +7,11 @@
     <param name="kforce" value=".05"/>
     <param name="numquads" value="2"/>
 
-    <param name="quadPoseTopic_1" type="string" value="Valkyrie/pose"/> <!-- MUST USE GLOBAL FRAME -->
+    <!-- MUST USE GLOBAL FRAME FOR POSE TOPICS -->
+    <param name="quadPoseTopic_1" type="string" value="Valkyrie/odom"/> 
     <param name="quadPVAListenTopic_1" type="string" value="px4_control/PVA_Ref"/>
     <param name="quadPVAPublish_1" type="string" value="px4_control/PVA_Ref_2"/>
-    <param name="quadPoseTopic_2" type="string" value="Valkyrie/pose"/>
+    <param name="quadPoseTopic_2" type="string" value="Dragon/odom"/>
     <param name="quadPVAListenTopic_2" type="string" value="px4_control/PVA_Ref_3"/>
     <param name="quadPVAPublish_2" type="string" value="px4_control/PVA_Ref_4"/>
 

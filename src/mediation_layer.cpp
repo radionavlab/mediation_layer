@@ -83,9 +83,8 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 		{
 			//uses inverse square forcing law
 			quad2Pose=quadArray[i].getPose();
-			netForcing = netForcing + k_forcing*(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm());
+			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm());
 		}
-
 	}
 
 	//fill new message by passing on this message with changes
@@ -122,7 +121,10 @@ int mediationLayer::indexOfMatchingString(const std::string (&stringmat)[10], co
 }
 
 
-
+Eigen::Vector3d mediationLayer::unitVector(const Eigen::Vector3d v1)
+{
+	return v1/v1.norm();
+}
 
 
 
