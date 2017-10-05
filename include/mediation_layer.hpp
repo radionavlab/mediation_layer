@@ -13,6 +13,8 @@
 #include <string>
 #include <iostream>
 #include <px4_control/PVA.h>
+#include <arenaObject.h>
+#include <fstream>
 
 class quad
 {
@@ -47,8 +49,13 @@ public:
 	void poseCallback(const ros::MessageEvent<nav_msgs::Odometry const>& event);
 	void pvaCallback(const ros::MessageEvent<px4_control::PVA const>& event);
     Eigen::Vector3d unitVector(const Eigen::Vector3d);
-
+    void generateObjectMatFromFile(std::string filename);
     int indexOfMatchingString(const std::string (&stringmat)[10], const int listlen, const std::string &matchstring);
+    void readPLYfile(std::string filename);
+    std::string readHeaderLine(std::string &thisLine);
+    std::string readVertexLine(std::string &thisLine);
+    std::string readFaceLine(std::string &thisLine);
+
 
 private:
 
@@ -57,11 +64,13 @@ private:
     */
     void readROSParameters(); 
 
-	int numQuads;
+	int numQuads, numVertices, numFaces;
     double k_forcing;
     std::string quadPoseTopics[10], quadPVAListenTopics[10], quadPVAPublishTopics[10];
     ros::Subscriber  pose_sub_[10], pva_sub_[10];
     ros::Publisher pva_pub_[10];
     quad quadArray[10];
+    Eigen::MatrixXd arenaObjectFaces[100], faceAreas, vertexMat;
+    //NOTE: IF RESIZING arenaObjectFaces, change the FOR loop limit in readPLYfile
 };
 

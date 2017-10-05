@@ -83,7 +83,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 		{
 			//uses inverse square forcing law
 			quad2Pose=quadArray[i].getPose();
-			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm());
+			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01);
 		}
 	}
 
@@ -114,10 +114,8 @@ int mediationLayer::indexOfMatchingString(const std::string (&stringmat)[10], co
 		{
 			ij=i;
 		}
-
 	}
 	return ij;
-
 }
 
 
@@ -127,4 +125,105 @@ Eigen::Vector3d mediationLayer::unitVector(const Eigen::Vector3d v1)
 }
 
 
+/*This function reads the PLY file and generates objects.  The main generation
+and handling is done in readPLYfile.  This function exists to handle errors and printing.*/
+void mediationLayer::generateObjectMatFromFile(std::string filename)
+{
 
+	if(!filename.empty())
+	{
+		readPLYfile(filename);
+	}
+
+}
+
+
+
+/*
+//example usage of arenaObject class
+arenaObject m1[2];
+m1[1].initializeSize(2);
+m1[1].setVertex(0,.1,.1,.1); //note: each vertex must be passed individually due to pass-by-reference problems in Eigen
+m1[1].setVertex(1,.2,.2,.2);
+Eigen::MatrixXd m2(2,3);
+m2=m1[1].returnPointMatrix();
+*/
+
+//#include <readPLYfile.h>
+
+void mediationLayer::readPLYfile(std::string filename)
+{
+	if(!filename.empty());
+	{
+		std::ifstream infile(filename);
+		//Read header
+		bool contvar=true;
+		int whilecounter, headerflag;
+		whilecounter=0; headerflag=0;
+		std::string thisline, firstword;
+		while(contvar)
+		{
+			whilecounter++; //don't loop through the whole damn file
+			std::getline(infile, thisline);
+
+			firstword = thisline.substr(0,thisline.find(" "));
+			if(firstword.compare("header") && headerflag==0) //header START
+			{
+				headerflag++;
+			}else if(firstword.compare("header") && headerflag==1) //header END
+			{
+				contvar=false;
+			}
+
+
+
+
+			if(whilecounter>=100)
+			{
+				contvar=false;
+			}
+		}
+
+
+		numFaces=10;
+		int numVertices_thisface=5;
+		arenaObjectFaces[1].resize(3,numVertices_thisface);
+
+		for(int i=0;i<numVertices;i++)
+		{
+
+		}
+		for(int i=0;(i<numFaces && i<100);i++)
+		{
+			int numPtsThisLine;
+
+			numPtsThisLine = 9001;
+	//		objectFaces[i].resize(3,numPtsThisLine);
+		}
+
+		}
+
+
+}
+
+
+std::string mediationLayer::readHeaderLine(std::string &thisLine)
+{
+
+
+}
+
+
+std::string mediationLayer::readVertexLine(std::string &thisLine)
+{
+
+
+}
+
+
+
+std::string mediationLayer::readFaceLine(std::string &thisLine)
+{
+
+
+}
