@@ -51,10 +51,7 @@ public:
     Eigen::Vector3d unitVector(const Eigen::Vector3d);
     void generateObjectMatFromFile(std::string filename);
     int indexOfMatchingString(const std::string (&stringmat)[10], const int listlen, const std::string &matchstring);
-    void readPLYfile(std::string filename);
-    std::string readHeaderLine(std::string &thisLine);
-    std::string readVertexLine(std::string &thisLine);
-    std::string readFaceLine(std::string &thisLine);
+    bool readPLYfile(std::string filename);
 
 
 private:
