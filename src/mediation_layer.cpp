@@ -24,7 +24,9 @@ void mediationLayer::readROSParameters()
 {
     // Topic names
 	ros::param::get("mediation_layer/numquads", numQuads);
-	ros::param::get("mediation_layer/kforce", k_forcing);
+	ros::param::get("mediation_layer/kforce_quad", k_forcing);
+	ros::param::get("mediation_layer/kforce_object",k_forcing_object);
+	ros::param::get("mediation_layer/sizeThresh",sizeThresh);
 	for(int i=0; i<numQuads; i++)
 	{
 		ros::param::get("mediation_layer/quadPoseTopic_"+std::to_string(i+1),quadPoseTopics[i]);
