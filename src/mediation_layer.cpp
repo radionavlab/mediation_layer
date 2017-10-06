@@ -149,34 +149,50 @@ Eigen::MatrixXd m2(2,3);
 m2=m1[1].returnPointMatrix();
 */
 
-//#include <readPLYfile.h>
-
-void mediationLayer::readPLYfile(std::string filename)
+//returns false on error
+bool mediationLayer::readPLYfile(std::string filename)
 {
 	if(!filename.empty());
 	{
 		std::ifstream infile(filename);
 		//Read header
 		bool contvar=true;
-		int whilecounter, headerflag;
-		whilecounter=0; headerflag=0;
-		std::string thisline, firstword;
+		int whilecounter, posIndex, numPtsThisLine, vertexIndex;
+		whilecounter=0; 
+		std::string thisline, firstword, secondword, tmp;
+
+		//read header
 		while(contvar)
 		{
-			whilecounter++; //don't loop through the whole damn file
+			whilecounter++; //don't loop through the whole file
 			std::getline(infile, thisline);
 
 			firstword = thisline.substr(0,thisline.find(" "));
-			if(firstword.compare("header") && headerflag==0) //header START
-			{
-				headerflag++;
-			}else if(firstword.compare("header") && headerflag==1) //header END
+			if(firstword.compare("end_header") && headerflag==0) //header START
 			{
 				contvar=false;
+			}else if(firstword.compare("element")) //pick out vertex length vs face length
+			{
+				secondword=thisline.substr(firstword.length(),thisline,find(" "));
+				if(secondword.compare("vertex"))
+				{
+					tmp=thisline.substr(thisline.find("vertex")+7,thisline.size());
+					numVertices=stoi(tmp);
+
+				}else if(secondword.compare("face"))
+				{
+					tmp=thisline.substr(thisline.find("face")+5,thisline.size());
+					numFaces=stoi(tmp);
+				}
+
+			}else if(firstword.compare("format")) //throw error if endian format
+			{
+				secondword=thisline.substr(firstword.length(),thisline,find(" "));
+				if(!firstword.compare("ascii"))
+				{
+					return false;
+				}
 			}
-
-
-
 
 			if(whilecounter>=100)
 			{
@@ -189,41 +205,59 @@ void mediationLayer::readPLYfile(std::string filename)
 		int numVertices_thisface=5;
 		arenaObjectFaces[1].resize(3,numVertices_thisface);
 
+		//read in each vertex and ignore color information
 		for(int i=0;i<numVertices;i++)
 		{
-
+			std::getline(infile, thisline);
+			posIndex=thisline.find(" ");
+			tmp = thisline.substr(0,posIndex);
+			vertexMat(0,i)=stod(tmp);
+			posIndex=thisline.find(" ",posIndex+1);
+			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
+			vertexMat(1,i)=stod(tmp);
+			posIndex=thisline.find(" ",posIndex+1);
+			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
+			vertexMat(2,i)=stod(tmp);
 		}
+
+		//for each face, do whatever
 		for(int i=0;(i<numFaces && i<100);i++)
 		{
-			int numPtsThisLine;
+			std::getline(infile, thisline);
+			posIndex = thisline.find(" ");
+			tmp = thisline.substr(0,posIndex);
+			numPtsThisLine = stoi(tmp); //first element in a row determines how many vertices appear on that row
+			objectFaces[i].resize(3,numPtsThisLine);
 
-			numPtsThisLine = 9001;
-	//		objectFaces[i].resize(3,numPtsThisLine);
+
+			//iterate through object. Do not do last point in case find fails at end of line
+			for(int j=0; j<numPtsThisLine-1; j++) 
+			{
+				posIndex = thisline.find(" ",posIndex+1);
+				tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
+				vertexIndex = stoi(tmp);
+				objectFaces[i](0,j) = vertexMat(0,vertexIndex);
+				objectFaces[i](1,j) = vertexMat(1,vertexIndex);
+				objectFaces[i](2,j) = vertexMat(2,vertexIndex);
+			}
+			//handle last index
+			posIndex = thisline.find(" ",posIndex+1);
+			lastindex=thisline.find(" ",posIndex+1);
+			if(lastindex=std::string::npos)
+			{
+				tmp = thisline.substr(posIndex,thisline.length());
+			}else
+			{
+				tmp = thisline.substr(posIndex,lastindex);
+			}
+			vertexIndex = stoi(tmp);
+			objectFaces[i](0,j) = vertexMat(0,vertexIndex);
+			objectFaces[i](1,j) = vertexMat(1,vertexIndex);
+			objectFaces[i](2,j) = vertexMat(2,vertexIndex);
 		}
 
-		}
+	}
 
-
-}
-
-
-std::string mediationLayer::readHeaderLine(std::string &thisLine)
-{
-
-
-}
-
-
-std::string mediationLayer::readVertexLine(std::string &thisLine)
-{
-
-
-}
-
-
-
-std::string mediationLayer::readFaceLine(std::string &thisLine)
-{
-
+	return true;
 
 }
