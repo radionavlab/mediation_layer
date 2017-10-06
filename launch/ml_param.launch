@@ -4,7 +4,13 @@
     name="medation_layer"
     output="screen">
 
-    <param name="kforce" value=".05"/>
+    <param name="kforce_quad" value="0.05"/>
+    <param name="kforce_object" value="0.05"/>
+    <param name="kforce_point" value="0.001"/>
+    <param name="zeroX" value="0.001"/> <!--location of .ply x0 in global frame-->
+    <param name="zeroY" value="0.001"/>
+    <param name="zeroZ" value="0.001"/>
+    <param name="sizeThresh" value=0.25/> <!--objects smaller than sizethresh are treated as point masses-->
     <param name="numquads" value="2"/>
 
     <!-- MUST USE GLOBAL FRAME FOR POSE TOPICS -->

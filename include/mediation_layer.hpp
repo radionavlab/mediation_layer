@@ -51,7 +51,10 @@ public:
     Eigen::Vector3d unitVector(const Eigen::Vector3d);
     void generateObjectMatFromFile(std::string filename);
     int indexOfMatchingString(const std::string (&stringmat)[10], const int listlen, const std::string &matchstring);
+    Eigen::MatrixXd rotatePolygonTo2D(Eigen::MatrixXd &inmat);
+    double polygonArea3d(Eigen::MatrixXd &inmat);
     bool readPLYfile(std::string filename);
+    double area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d vecNormal);
 
 
 private:
@@ -62,12 +65,13 @@ private:
     void readROSParameters(); 
 
 	int numQuads, numVertices, numFaces;
-    double k_forcing;
+    double k_forcing, k_forcing_object, k_forcing_point, sizeThresh;
     std::string quadPoseTopics[10], quadPVAListenTopics[10], quadPVAPublishTopics[10];
     ros::Subscriber  pose_sub_[10], pva_sub_[10];
     ros::Publisher pva_pub_[10];
     quad quadArray[10];
-    Eigen::MatrixXd arenaObjectFaces[100], faceAreas, vertexMat;
+    Eigen::Vector3d zeroCenter;
+    Eigen::MatrixXd objectFaces[100], faceAreas, vertexMat;
     //NOTE: IF RESIZING arenaObjectFaces, change the FOR loop limit in readPLYfile
 };
 

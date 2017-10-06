@@ -26,7 +26,11 @@ void mediationLayer::readROSParameters()
 	ros::param::get("mediation_layer/numquads", numQuads);
 	ros::param::get("mediation_layer/kforce_quad", k_forcing);
 	ros::param::get("mediation_layer/kforce_object",k_forcing_object);
+	ros::param::get("mediation_layer/kforce_point",k_forcing_point);
 	ros::param::get("mediation_layer/sizeThresh",sizeThresh);
+	ros::param::get("mediation_layer/zeroX",zeroCenter(0));
+	ros::param::get("mediation_layer/zeroY",zeroCenter(1));
+	ros::param::get("mediation_layer/zeroZ",zeroCenter(2));
 	for(int i=0; i<numQuads; i++)
 	{
 		ros::param::get("mediation_layer/quadPoseTopic_"+std::to_string(i+1),quadPoseTopics[i]);
@@ -34,8 +38,8 @@ void mediationLayer::readROSParameters()
 		ros::param::get("mediation_layer/quadPVAPublishTopic_"+std::to_string(i+1),quadPVAPublishTopics[i]);
 		quadArray[i].setName(i);
 	}
-
 }
+
 
 void mediationLayer::poseCallback(const ros::MessageEvent<nav_msgs::Odometry const>& event)
 { 
@@ -58,8 +62,8 @@ void mediationLayer::poseCallback(const ros::MessageEvent<nav_msgs::Odometry con
 	tmp(1)=msg->twist.twist.linear.y;
 	tmp(2)=msg->twist.twist.linear.z;
 	quadArray[thisQuadNum].setVel(tmp);	
-
 }
+
 
 void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>& event)
 { 
@@ -103,8 +107,8 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 	PVA_Ref_msg.Acc.z = msg->Acc.z + netForcing(2);
 
 	pva_pub_[thisQuadNum].publish(PVA_Ref_msg);
-
 }
+
 
 int mediationLayer::indexOfMatchingString(const std::string (&stringmat)[10], const int listlen, const std::string &matchstring)
 {
@@ -151,6 +155,7 @@ Eigen::MatrixXd m2(2,3);
 m2=m1[1].returnPointMatrix();
 */
 
+
 //returns false on error
 bool mediationLayer::readPLYfile(std::string filename)
 {
@@ -159,9 +164,10 @@ bool mediationLayer::readPLYfile(std::string filename)
 		std::ifstream infile(filename);
 		//Read header
 		bool contvar=true;
-		int whilecounter, posIndex, numPtsThisLine, vertexIndex;
+		int whilecounter, posIndex, numPtsThisLine, vertexIndex, lastindex;
 		whilecounter=0; 
 		std::string thisline, firstword, secondword, tmp;
+		Eigen::MatrixXd tmpmat;
 
 		//read header
 		while(contvar)
@@ -170,12 +176,12 @@ bool mediationLayer::readPLYfile(std::string filename)
 			std::getline(infile, thisline);
 
 			firstword = thisline.substr(0,thisline.find(" "));
-			if(firstword.compare("end_header") && headerflag==0) //header START
+			if(firstword.compare("end_header")) //header START
 			{
 				contvar=false;
 			}else if(firstword.compare("element")) //pick out vertex length vs face length
 			{
-				secondword=thisline.substr(firstword.length(),thisline,find(" "));
+				secondword=thisline.substr(firstword.length(),thisline.find(" "));
 				if(secondword.compare("vertex"))
 				{
 					tmp=thisline.substr(thisline.find("vertex")+7,thisline.size());
@@ -189,7 +195,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 
 			}else if(firstword.compare("format")) //throw error if endian format
 			{
-				secondword=thisline.substr(firstword.length(),thisline,find(" "));
+				secondword=thisline.substr(firstword.length(),thisline.find(" "));
 				if(!firstword.compare("ascii"))
 				{
 					return false;
@@ -202,10 +208,11 @@ bool mediationLayer::readPLYfile(std::string filename)
 			}
 		}
 
-
+		/* //example usage DO NOT USE
 		numFaces=10;
 		int numVertices_thisface=5;
-		arenaObjectFaces[1].resize(3,numVertices_thisface);
+		objectFaces[1].resize(3,numVertices_thisface);
+		*/
 
 		//read in each vertex and ignore color information
 		for(int i=0;i<numVertices;i++)
@@ -213,13 +220,22 @@ bool mediationLayer::readPLYfile(std::string filename)
 			std::getline(infile, thisline);
 			posIndex=thisline.find(" ");
 			tmp = thisline.substr(0,posIndex);
-			vertexMat(0,i)=stod(tmp);
+			vertexMat(0,i)=stod(tmp)+zeroCenter(0);
 			posIndex=thisline.find(" ",posIndex+1);
 			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
-			vertexMat(1,i)=stod(tmp);
-			posIndex=thisline.find(" ",posIndex+1);
-			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
-			vertexMat(2,i)=stod(tmp);
+			vertexMat(1,i)=stod(tmp)+zeroCenter(1);
+			
+			//handle end of line
+			posIndex = thisline.find(" ",posIndex+1);
+			lastindex = thisline.find(" ",posIndex+1);
+			if(lastindex=std::string::npos)
+			{
+				tmp = thisline.substr(posIndex,thisline.length());
+			}else
+			{
+				tmp = thisline.substr(posIndex,lastindex);
+			}
+			vertexMat(2,i)=stod(tmp)+zeroCenter(2);
 		}
 
 		//for each face, do whatever
@@ -244,7 +260,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 			}
 			//handle last index
 			posIndex = thisline.find(" ",posIndex+1);
-			lastindex=thisline.find(" ",posIndex+1);
+			lastindex = thisline.find(" ",posIndex+1);
 			if(lastindex=std::string::npos)
 			{
 				tmp = thisline.substr(posIndex,thisline.length());
@@ -253,13 +269,118 @@ bool mediationLayer::readPLYfile(std::string filename)
 				tmp = thisline.substr(posIndex,lastindex);
 			}
 			vertexIndex = stoi(tmp);
-			objectFaces[i](0,j) = vertexMat(0,vertexIndex);
-			objectFaces[i](1,j) = vertexMat(1,vertexIndex);
-			objectFaces[i](2,j) = vertexMat(2,vertexIndex);
+			objectFaces[i](0,numPtsThisLine-1) = vertexMat(0,vertexIndex);
+			objectFaces[i](1,numPtsThisLine-1) = vertexMat(1,vertexIndex);
+			objectFaces[i](2,numPtsThisLine-1) = vertexMat(2,vertexIndex);
+
+			tmpmat.resize(3,numPtsThisLine+1);
+			tmpmat.leftCols(numPtsThisLine)=objectFaces[i];
+			tmpmat(0,numPtsThisLine)=objectFaces[i](0,0);
+			tmpmat(1,numPtsThisLine)=objectFaces[i](1,0);
+			tmpmat(2,numPtsThisLine)=objectFaces[i](2,0);
 		}
 
 	}
 
 	return true;
-
 }
+
+
+Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
+{
+	int numcols;
+	numcols=inmat.cols();
+
+	//vector work to rotate to the origin
+	Eigen::Vector3d origin, localx, localy, localz, unitx, unity, unitz, tmpvec;
+	origin(0)=inmat(0,0); origin(1)=inmat(1,0); origin(2)=inmat(2,0);
+	localx(0)=inmat(0,1)-inmat(0,0); localx(1)=inmat(1,1)-inmat(1,0); localx(2)=inmat(2,1)-inmat(2,0);
+	unitx = unitVector(localx);
+	tmpvec(0)=inmat(0,2)-inmat(0,0); tmpvec(1)=inmat(1,2)-inmat(1,0); tmpvec(2)=inmat(2,2)-inmat(2,0);
+	localz = tmpvec.cross(localx);
+	unitz = unitVector(localz);
+	unity = unitz.cross(unitx);
+
+	//create transformation matrix
+	Eigen::MatrixXd Tmat(4,4);
+	Tmat.setZero();
+	Tmat(0,0)=unitx(0); Tmat(1,0)=unitx(1); Tmat(2,0)=unitx(2);
+	Tmat(0,1)=unity(0); Tmat(1,1)=unity(1); Tmat(2,1)=unity(2);
+	Tmat(0,2)=unitz(0); Tmat(1,2)=unitz(1); Tmat(2,2)=unitz(2);
+	Tmat(0,3)=origin(0); Tmat(1,3)=origin(1); Tmat(2,3)=origin(2); 
+	Tmat(3,3)=1;
+
+	Eigen::MatrixXd Cmat(4,inmat.cols());
+	Cmat.setOnes();
+	Cmat.topRows(3)=inmat;
+	Cmat=(Tmat.inverse()*Cmat.transpose()).transpose();
+	
+	return Cmat.topRows(3);
+}
+
+
+// http://geomalgorithms.com/a01-_area.html#2D%20Polygons
+double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d vecNormal)
+{
+	//vecNormal is a normal vector to the plane
+	//pointmat is a 3 x n+1 matrix of points, with the initial point copied to the last point
+    double area = 0;
+    float an, ax, ay, az; // abs value of normal and its coords
+    int  coord;           // coord to ignore: 1=x, 2=y, 3=z
+    int  i, j, k;         // loop indices
+
+    if (n < 3) return 0;  // a degenerate polygon
+
+    // select largest abs coordinate to ignore for projection
+    ax = (vecNormal(0)>0 ? vecNormal(0) : -vecNormal(0));    // abs x-coord
+    ay = (vecNormal(1)>0 ? vecNormal(1) : -vecNormal(1));    // abs y-coord
+    az = (vecNormal(2)>0 ? vecNormal(2) : -vecNormal(2));    // abs z-coord
+
+    coord = 3;                    // ignore z-coord
+    if (ax > ay) {
+        if (ax > az) coord = 1;   // ignore x-coord
+    }
+    else if (ay > az) coord = 2;  // ignore y-coord
+
+    // compute area of the 2D projection
+    switch (coord) {
+      case 1:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(1,i) * (pointmat(2,j) - pointmat(2,k)));
+        break;
+      case 2:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(2,i) * (pointmat(0,j) - pointmat(0,k)));
+        break;
+      case 3:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(0,i) * (pointmat(1,j) - pointmat(1,k)));
+        break;
+    }
+    switch (coord) {    // wrap-around term
+      case 1:
+        area += (pointmat(1,n) * (pointmat(2,1) - pointmat(2,n-1)));
+        break;
+      case 2:
+        area += (pointmat(2,n) * (pointmat(0,1) - pointmat(0,n-1)));
+        break;
+      case 3:
+        area += (pointmat(0,n) * (pointmat(1,1) - pointmat(1,n-1)));
+        break;
+    }
+
+    // scale to get area before projection
+    an = sqrt( ax*ax + ay*ay + az*az); // length of normal vector
+    switch (coord) {
+      case 1:
+        area *= (an / (2 * vecNormal(0)));
+        break;
+      case 2:
+        area *= (an / (2 * vecNormal(1)));
+        break;
+      case 3:
+        area *= (an / (2 * vecNormal(2)));
+    }
+    return area;
+}
+
