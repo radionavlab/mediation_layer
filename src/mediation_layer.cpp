@@ -75,14 +75,19 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 
 	//get quad's name
 	int thisQuadNum = indexOfMatchingString(quadPoseTopics,numQuads,publisher_name);
+	Eigen::MatrixXd& thisMat, Am(3,3);
 
 	//update quad params
-	Eigen::Vector3d thisQuadPose, quad2Pose;
+	Eigen::Vector3d thisQuadPose, quad2Pose, netForcing, tempvec, nn, p0, abc, p0pvec;
 	thisQuadPose=quadArray[thisQuadNum].getPose();
+	Eigen::VectorXd distvec;
+	Eigen::MatrixXd unitVecs;
 
 	//call ML
-	Eigen::Vector3d netForcing;
+	Eigen::Vector3d&  v1, v2, v3;
+	double tt, mindistSquared, productABC, thisDist;
 	netForcing.setZero();
+	//iterate through quads
 	for(int i=0; i<numQuads; i++)
 	{
 		if(i!=thisQuadNum)
@@ -90,6 +95,81 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 			//uses inverse square forcing law
 			quad2Pose=quadArray[i].getPose();
 			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01);
+		}
+	}
+
+	//get distance to each vertex in the list; precomputing for efficiency
+	for(int i=0; i<numVertices; i++)
+	{
+		vertexDist(1,i) = pow(thisQuadPose(0)-vertexMat(0,i),2) + pow(thisQuadPose(1)-vertexMat(1,i),2) + pow(thisQuadPose(2)-vertexMat(2,i),2);
+	}
+
+	//iterate through objects
+	for(int i=0; i<numFaces; i++)
+	{
+		if(faceAreas(i)<sizeThresh) //treat small objects as point masses
+		{
+			quad2Pose(0)->faceVector(0,i); quad2Pose(1)->faceVector(1,i); quad2Pose(2)->faceVector(2,i);
+			netForcing = netForcing + k_forcing_point*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
+		}else
+		{
+			distvec.resize(objectFaces[i].cols()-2);
+			thisMat.setZero();
+			thisMat.resize(3,objectFaces[i].cols());
+			thisMat->objectFaces[i];
+			//implement 2D method if too complicated
+			v1(0)->thisMat(0,0); v1(1)->thisMat(1,0); v1(2)->thisMat(2,0);
+			v2(0)->thisMat(0,1); v2(1)->thisMat(1,1); v2(2)->thisMat(2,1);
+
+			for(int j=0; j<thisMat.cols()-2; j++)
+			{
+				v3(0)->thisMat(0,j+2); v3(1)->thisMat(1,j+2); v3(2)->thisMat(2,j+2);
+				nn=unitVector((v2-v1).cross(v3-v1));
+				tt=nn.dot(v1)-nn.dot(thisQuadPose);
+				p0=thisQuadPose+tt*nn;
+				if(tt>=0 && tt<=1)
+				{
+					distvec=(thisQuadPose-p0).squaredDorm();
+				}else
+				{
+					Am << v1,v2,v3;
+					abc=inv(Am)*thisQuadPose;
+					productABC=abc(0)*abc(1)*abc(2);
+					if(productABC>0)
+					{
+						if(abc(0)>0)
+						{
+							thisDist=(thisQuadPose-v1).squaredNorm();
+						}else if(abc(1)>0)
+						{
+							thisDist=(thisQuadPose-v2).squaredNorm();
+						}else
+						{
+							thisDist=(thisQuadPose-v3).squaredNorm();
+						}
+					}else
+					{
+						if(abc(0)<0)
+						{
+							thisDist=distToLine(thisQuadPose,v1,v2);
+						}else if(abc(1)<0)
+						{
+							thisDist=distToLine(thisQuadPose,v1,v3);
+						}else if(abc(2)<0)
+						{
+							thisDist=distToLine(thisQuadPose,v2,v3);
+						}
+					}
+				}
+
+				//completing 
+				distvec(j)=thisDist;
+				v2=v3;
+			}
+			mindistSquared=distvec.minCoeff();
+			p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
+			netForcing = netForcing + kforce_object * p0pvec / mindistSquared;
+
 		}
 	}
 
@@ -140,7 +220,6 @@ void mediationLayer::generateObjectMatFromFile(std::string filename)
 	{
 		readPLYfile(filename);
 	}
-
 }
 
 
@@ -168,6 +247,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		whilecounter=0; 
 		std::string thisline, firstword, secondword, tmp;
 		Eigen::MatrixXd tmpmat;
+		Eigen::Vector3d unitnormal, v1, v2;
 
 		//read header
 		while(contvar)
@@ -207,6 +287,8 @@ bool mediationLayer::readPLYfile(std::string filename)
 				contvar=false;
 			}
 		}
+		faceVector.resize(3,numFaces);
+		vertexDist.resize(1,numVertices);
 
 		/* //example usage DO NOT USE
 		numFaces=10;
@@ -247,7 +329,6 @@ bool mediationLayer::readPLYfile(std::string filename)
 			numPtsThisLine = stoi(tmp); //first element in a row determines how many vertices appear on that row
 			objectFaces[i].resize(3,numPtsThisLine);
 
-
 			//iterate through object. Do not do last point in case find fails at end of line
 			for(int j=0; j<numPtsThisLine-1; j++) 
 			{
@@ -273,11 +354,20 @@ bool mediationLayer::readPLYfile(std::string filename)
 			objectFaces[i](1,numPtsThisLine-1) = vertexMat(1,vertexIndex);
 			objectFaces[i](2,numPtsThisLine-1) = vertexMat(2,vertexIndex);
 
+			//find polygon areas and face vectors
+			tmpmat.setZero();
 			tmpmat.resize(3,numPtsThisLine+1);
 			tmpmat.leftCols(numPtsThisLine)=objectFaces[i];
 			tmpmat(0,numPtsThisLine)=objectFaces[i](0,0);
 			tmpmat(1,numPtsThisLine)=objectFaces[i](1,0);
 			tmpmat(2,numPtsThisLine)=objectFaces[i](2,0);
+			v1(0)=tmpmat(0,1)-tmpmat(0,0); v1(1)=tmpmat(1,1)-tmpmat(1,0); v1(2)=tmpmat(2,1)-tmpmat(2,0);
+			v2(0)=tmpmat(0,2)-tmpmat(0,0); v2(1)=tmpmat(1,2)-tmpmat(1,0); v2(2)=tmpmat(2,2)-tmpmat(2,0);
+			unitnormal=unitVector(v1.cross(v2));
+			faceAreas(i)=area3D_Polygon(numPtsThisLine,tmpmat,unitnormal);
+			faceCenter(0,i)=(objectFaces[i].row(0)).mean();   //facevector denotes center of face on small objects
+			faceCenter(1,i)=(objectFaces[i].row(1)).mean();
+			faceCenter(2,i)=(objectFaces[i].row(2)).mean();
 		}
 
 	}
@@ -286,6 +376,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 }
 
 
+//may encouter issues with referencing pointers, need to dereference this
 Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
 {
 	int numcols;
@@ -320,7 +411,7 @@ Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
 
 
 // http://geomalgorithms.com/a01-_area.html#2D%20Polygons
-double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d vecNormal)
+double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d &vecNormal)
 {
 	//vecNormal is a normal vector to the plane
 	//pointmat is a 3 x n+1 matrix of points, with the initial point copied to the last point
@@ -332,9 +423,9 @@ double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::V
     if (n < 3) return 0;  // a degenerate polygon
 
     // select largest abs coordinate to ignore for projection
-    ax = (vecNormal(0)>0 ? vecNormal(0) : -vecNormal(0));    // abs x-coord
-    ay = (vecNormal(1)>0 ? vecNormal(1) : -vecNormal(1));    // abs y-coord
-    az = (vecNormal(2)>0 ? vecNormal(2) : -vecNormal(2));    // abs z-coord
+    ax = (*vecNormal(0)>0 ? *vecNormal(0) : -*vecNormal(0));    // abs x-coord
+    ay = (*vecNormal(1)>0 ? *vecNormal(1) : -*vecNormal(1));    // abs y-coord
+    az = (*vecNormal(2)>0 ? *vecNormal(2) : -*vecNormal(2));    // abs z-coord
 
     coord = 3;                    // ignore z-coord
     if (ax > ay) {
@@ -346,26 +437,26 @@ double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::V
     switch (coord) {
       case 1:
         for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(1,i) * (pointmat(2,j) - pointmat(2,k)));
+            area += (*pointmat(1,i) * (*pointmat(2,j) - *pointmat(2,k)));
         break;
       case 2:
         for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(2,i) * (pointmat(0,j) - pointmat(0,k)));
+            area += (*pointmat(2,i) * (*pointmat(0,j) - *pointmat(0,k)));
         break;
       case 3:
         for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(0,i) * (pointmat(1,j) - pointmat(1,k)));
+            area += (*pointmat(0,i) * (pointmat(1,j) - *pointmat(1,k)));
         break;
     }
     switch (coord) {    // wrap-around term
       case 1:
-        area += (pointmat(1,n) * (pointmat(2,1) - pointmat(2,n-1)));
+        area += (*pointmat(1,n) * (*pointmat(2,1) - *pointmat(2,n-1)));
         break;
       case 2:
-        area += (pointmat(2,n) * (pointmat(0,1) - pointmat(0,n-1)));
+        area += (*pointmat(2,n) * (*pointmat(0,1) - *pointmat(0,n-1)));
         break;
       case 3:
-        area += (pointmat(0,n) * (pointmat(1,1) - pointmat(1,n-1)));
+        area += (*pointmat(0,n) * (*pointmat(1,1) - *pointmat(1,n-1)));
         break;
     }
 
@@ -373,14 +464,33 @@ double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::V
     an = sqrt( ax*ax + ay*ay + az*az); // length of normal vector
     switch (coord) {
       case 1:
-        area *= (an / (2 * vecNormal(0)));
+        area *= (an / (2 * (*vecNormal(0))));
         break;
       case 2:
-        area *= (an / (2 * vecNormal(1)));
+        area *= (an / (2 * (*vecNormal(1))));
         break;
       case 3:
-        area *= (an / (2 * vecNormal(2)));
+        area *= (an / (2 * (*vecNormal(2))));
     }
     return area;
 }
+
+double mediationLayer::distSquaredToLine(Eigen::Vector3d &p,Eigen::Vector3d &v1, Eigen::Vector3d &v2)
+{
+	Eigen::Vector3d M;
+	double t0;
+	t0 = M.dot((*p) - (*v1))/M.dot(M);
+	M=(*v2)-(*v1);
+	if(t0<=0)
+	{
+		return ((*p)-(*v1)).squaredNorm();
+	}else if(t0<1)
+	{
+		return ((*p)-((*v1)+t0*M)).squaredNorm();
+	}else
+	{
+		return ((*p)-((*v1)+M)).squaredNorm();
+	}
+}
+
 

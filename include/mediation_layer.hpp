@@ -54,8 +54,8 @@ public:
     Eigen::MatrixXd rotatePolygonTo2D(Eigen::MatrixXd &inmat);
     double polygonArea3d(Eigen::MatrixXd &inmat);
     bool readPLYfile(std::string filename);
-    double area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d vecNormal);
-
+    double area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d &vecNormal);
+    double distSquaredToLine(Eigen::Vector3d &p,Eigen::Vector3d &v1, Eigen::Vector3d &v2);
 
 private:
 
@@ -71,7 +71,7 @@ private:
     ros::Publisher pva_pub_[10];
     quad quadArray[10];
     Eigen::Vector3d zeroCenter;
-    Eigen::MatrixXd objectFaces[100], faceAreas, vertexMat;
+    Eigen::MatrixXd objectFaces[100], faceAreas, vertexMat, faceCenter, vertexDist;
     //NOTE: IF RESIZING arenaObjectFaces, change the FOR loop limit in readPLYfile
 };
 
