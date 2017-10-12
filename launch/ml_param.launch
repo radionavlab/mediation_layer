@@ -11,6 +11,7 @@
     <param name="zeroY" value="0.001"/>
     <param name="zeroZ" value="0.001"/>
     <param name="sizeThresh" value=0.25/> <!--objects smaller than sizethresh are treated as point masses-->
+    <param name="distThresh" value=0.25/> <!--size thresh under which to lump objects into a single mass-->
     <param name="numquads" value="2"/>
 
     <!-- MUST USE GLOBAL FRAME FOR POSE TOPICS -->

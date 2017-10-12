@@ -28,6 +28,7 @@ void mediationLayer::readROSParameters()
 	ros::param::get("mediation_layer/kforce_object",k_forcing_object);
 	ros::param::get("mediation_layer/kforce_point",k_forcing_point);
 	ros::param::get("mediation_layer/sizeThresh",sizeThresh);
+	ros::param::get("mediation_layer/distThresh",minDistThresh);
 	ros::param::get("mediation_layer/zeroX",zeroCenter(0));
 	ros::param::get("mediation_layer/zeroY",zeroCenter(1));
 	ros::param::get("mediation_layer/zeroZ",zeroCenter(2));
@@ -244,6 +245,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		//Read header
 		bool contvar=true;
 		int whilecounter, posIndex, numPtsThisLine, vertexIndex, lastindex;
+		double thisObjectDist;
 		whilecounter=0; 
 		std::string thisline, firstword, secondword, tmp;
 		Eigen::MatrixXd tmpmat;
@@ -323,6 +325,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		//for each face, do whatever
 		for(int i=0;(i<numFaces && i<100);i++)
 		{
+			Eigen::VectorXd objectDistVector;
 			std::getline(infile, thisline);
 			posIndex = thisline.find(" ");
 			tmp = thisline.substr(0,posIndex);
@@ -368,6 +371,33 @@ bool mediationLayer::readPLYfile(std::string filename)
 			faceCenter(0,i)=(objectFaces[i].row(0)).mean();   //facevector denotes center of face on small objects
 			faceCenter(1,i)=(objectFaces[i].row(1)).mean();
 			faceCenter(2,i)=(objectFaces[i].row(2)).mean();
+
+			/*
+			//iterate through all objects currently in ML and add this to the index of indices to process
+			if(i==0) //always add to next index
+			{
+				objectDistVector.resize(1,-1);
+				indexToUseInCalculation(0)=i;
+			}else if(indexToUseInCalculation.size()==2)  //it is initialized at size 2 for the compiler
+			{
+				indexToUseInCalculation(1)=i;
+			}else
+			{
+				objectDistVector.resize(indexToUseInCalculation.cols(),-1);
+				for(int j=0; j<indexToUseInCalculation.size(); j++)
+				{
+					//compare this object to all other objects in .ply
+					objectDistVector(j)=(faceCenter.col(i)-faceCenter.col(j)).squaredNorm();
+				}
+
+				//use items from full table that are either (a) large or (b) at the center of a group
+				if(faceAreas(i)>sizeThresh ||
+						(sqrt(objectDistVector.minCoeff()) > minDistThresh && faceAreas(i)<sizeThresh) )
+				{	
+					indexToUseInCalculation.resize(indexToUseInCalculation.size()+1,i);
+				}
+			}
+			*/
 		}
 
 	}
