@@ -13,7 +13,7 @@
 #include <string>
 #include <iostream>
 #include <px4_control/PVA.h>
-#include <arenaObject.h>
+//#include <arenaObject.h>
 #include <fstream>
 
 class quad

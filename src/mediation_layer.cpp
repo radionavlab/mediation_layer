@@ -105,14 +105,18 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 		vertexDist(1,i) = pow(thisQuadPose(0)-vertexMat(0,i),2) + pow(thisQuadPose(1)-vertexMat(1,i),2) + pow(thisQuadPose(2)-vertexMat(2,i),2);
 	}
 
+	int i;
+
 	//iterate through objects
-	for(int i=0; i<numFaces; i++)
+	for(int ij=0; ij<indexToUseInCalculation.size(); ij++)
 	{
+		i=indexToUseInCalculation(ij);
+		
 		if(faceAreas(i)<sizeThresh) //treat small objects as point masses
 		{
 			quad2Pose(0)=faceCenter(0,i); quad2Pose(1)=faceCenter(1,i); quad2Pose(2)=faceCenter(2,i);
 			netForcing = netForcing + k_forcing_point*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
-		}else
+		}else //for objects such as walls
 		{
 			distvec.resize(objectFaces[i].cols()-2);
 			thisMat.setZero();
@@ -128,11 +132,12 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 				nn=unitVector((v2-v1).cross(v3-v1));
 				tt=nn.dot(v1)-nn.dot(thisQuadPose);
 				p0=thisQuadPose+tt*nn;
-				if(tt>=0 && tt<=1)
+				if(tt>=0 && tt<=1) //if the projection of the quad's pose is inside of the wall
 				{
 					distvec(j)=(thisQuadPose-p0).squaredNorm();
-				}else
+				}else  //if the projection of the quad's pose is outside of an object, find nearest point/line
 				{  //uses barycentric method for finding nearest point or line segment
+					thisDist=0;
 					Am << v1,v2,v3;
 					abc=Am.inverse()*thisQuadPose;
 					productABC=abc(0)*abc(1)*abc(2);
@@ -170,7 +175,6 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 			mindistSquared=distvec.minCoeff();
 			p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
 			netForcing = netForcing + k_forcing_object * p0pvec / mindistSquared;
-
 		}
 	}
 
@@ -224,7 +228,6 @@ void mediationLayer::generateObjectMatFromFile(std::string filename)
 }
 
 
-
 /*
 //example usage of arenaObject class
 arenaObject m1[2];
@@ -234,7 +237,6 @@ m1[1].setVertex(1,.2,.2,.2);
 Eigen::MatrixXd m2(2,3);
 m2=m1[1].returnPointMatrix();
 */
-
 
 //returns false on error
 bool mediationLayer::readPLYfile(std::string filename)
@@ -371,8 +373,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 			faceCenter(0,i)=(objectFaces[i].row(0)).mean();   //facevector denotes center of face on small objects
 			faceCenter(1,i)=(objectFaces[i].row(1)).mean();
 			faceCenter(2,i)=(objectFaces[i].row(2)).mean();
-
-			/*
+			
 			//iterate through all objects currently in ML and add this to the index of indices to process
 			if(i==0) //always add to next index
 			{
@@ -397,10 +398,8 @@ bool mediationLayer::readPLYfile(std::string filename)
 					indexToUseInCalculation.resize(indexToUseInCalculation.size()+1,i);
 				}
 			}
-			*/
-		}
-
-	}
+		}//end FOR (over polygons)
+	}//end IF
 
 	return true;
 }
