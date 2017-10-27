@@ -3,6 +3,18 @@
 mediationLayer::mediationLayer(ros::NodeHandle &nh)
 {
 
+	readROSParameters();
+
+	ROS_INFO(("fname:"+inFile).c_str());
+	bool successvar=readPLYfile(inFile);
+	if(successvar)
+	{
+		ROS_INFO("ML creation returned success");
+	}else
+	{
+		ROS_INFO("ML launch failed");
+	}
+
 	//create all subscribers/publishers
 	for(int i=0; i<numQuads; i++)
 	{
@@ -23,20 +35,23 @@ mediationLayer::mediationLayer(ros::NodeHandle &nh)
 void mediationLayer::readROSParameters() 
 {
     // Topic names
-	ros::param::get("mediation_layer/numquads", numQuads);
-	ros::param::get("mediation_layer/kforce_quad", k_forcing);
-	ros::param::get("mediation_layer/kforce_object",k_forcing_object);
-	ros::param::get("mediation_layer/kforce_point",k_forcing_point);
-	ros::param::get("mediation_layer/sizeThresh",sizeThresh);
-	ros::param::get("mediation_layer/distThresh",minDistThresh);
-	ros::param::get("mediation_layer/zeroX",zeroCenter(0));
-	ros::param::get("mediation_layer/zeroY",zeroCenter(1));
-	ros::param::get("mediation_layer/zeroZ",zeroCenter(2));
+    std::string nodeName = ros::this_node::getName();
+	ros::param::get(nodeName+"/numquads", numQuads);
+	ros::param::get(nodeName+"/kforce_quad", k_forcing);
+	ros::param::get(nodeName+"/kforce_object",k_forcing_object);
+	ros::param::get(nodeName+"/kforce_point",k_forcing_point);
+	ros::param::get(nodeName+"/sizeThresh",sizeThresh);
+	ros::param::get(nodeName+"/distThresh",minDistThresh);
+	ros::param::get(nodeName+"/zeroX",zeroCenter(0));
+	ros::param::get(nodeName+"/zeroY",zeroCenter(1));
+	ros::param::get(nodeName+"/zeroZ",zeroCenter(2));
+	ros::param::get(nodeName+"/filename", inFile);
+	ROS_INFO("ROS topic: %s", inFile.c_str());
 	for(int i=0; i<numQuads; i++)
 	{
-		ros::param::get("mediation_layer/quadPoseTopic_"+std::to_string(i+1),quadPoseTopics[i]);
-		ros::param::get("mediation_layer/quadPVAListenTopic_"+std::to_string(i+1),quadPVAListenTopics[i]);
-		ros::param::get("mediation_layer/quadPVAPublishTopic_"+std::to_string(i+1),quadPVAPublishTopics[i]);
+		ros::param::get(nodeName+"/quadPoseTopic_"+std::to_string(i+1),quadPoseTopics[i]);
+		ros::param::get(nodeName+"/quadPVAListenTopic_"+std::to_string(i+1),quadPVAListenTopics[i]);
+		ros::param::get(nodeName+"/quadPVAPublishTopic_"+std::to_string(i+1),quadPVAPublishTopics[i]);
 		quadArray[i].setName(i);
 	}
 }
@@ -123,6 +138,8 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 			thisMat.resize(3,objectFaces[i].cols());
 			thisMat=objectFaces[i];
 			//implement 2D method if too complicated
+
+			//break object into a set of triangles and handle point matching from triangles instead of larger polygons
 			v1(0)=thisMat(0,0); v1(1)=thisMat(1,0); v1(2)=thisMat(2,0);
 			v2(0)=thisMat(0,1); v2(1)=thisMat(1,1); v2(2)=thisMat(2,1);
 
@@ -141,7 +158,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 					Am << v1,v2,v3;
 					abc=Am.inverse()*thisQuadPose;
 					productABC=abc(0)*abc(1)*abc(2);
-					if(productABC>0)
+					if(productABC>0)  //dist to point
 					{
 						if(abc(0)>0)
 						{
@@ -155,7 +172,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 						}
 					}else
 					{
-						if(abc(0)<0)
+						if(abc(0)<0)  //dist to line
 						{
 							thisDist=distSquaredToLine(thisQuadPose,v1,v2);
 						}else if(abc(1)<0)
@@ -172,7 +189,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 				distvec(j)=thisDist;
 				v2=v3;
 			}
-			mindistSquared=distvec.minCoeff();
+			mindistSquared=distvec.minCoeff(); //find the closest triangle on the object
 			p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
 			netForcing = netForcing + k_forcing_object * p0pvec / mindistSquared;
 		}
@@ -244,6 +261,8 @@ bool mediationLayer::readPLYfile(std::string filename)
 	if(!filename.empty());
 	{
 		std::ifstream infile(filename);
+		ROS_INFO(("fname:"+filename).c_str());
+
 		//Read header
 		bool contvar=true;
 		int whilecounter, posIndex, numPtsThisLine, vertexIndex, lastindex;
@@ -257,34 +276,38 @@ bool mediationLayer::readPLYfile(std::string filename)
 		while(contvar)
 		{
 			whilecounter++; //don't loop through the whole file
+
 			std::getline(infile, thisline);
 
 			firstword = thisline.substr(0,thisline.find(" "));
-			if(firstword.compare("end_header")) //header START
+			if(strcmp(firstword.c_str(),"end_header")==0) //header START
 			{
+				ROS_INFO("Header end reached: %d vertices, %d faces",numVertices,numFaces);
 				contvar=false;
-			}else if(firstword.compare("element")) //pick out vertex length vs face length
+			}else if(strcmp(firstword.c_str(),"element")==0) //pick out vertex length vs face length
 			{
-				secondword=thisline.substr(firstword.length(),thisline.find(" "));
-				if(secondword.compare("vertex"))
+//				ROS_INFO("Found element");
+				secondword=thisline.substr(8,thisline.find(' ',8)-8);
+				if(strcmp(secondword.c_str(),"vertex")==0)
 				{
 					tmp=thisline.substr(thisline.find("vertex")+7,thisline.size());
 					numVertices=stoi(tmp);
 
-				}else if(secondword.compare("face"))
+				}else if(strcmp(secondword.c_str(),"face")==0)
 				{
 					tmp=thisline.substr(thisline.find("face")+5,thisline.size());
 					numFaces=stoi(tmp);
 				}
 
-			}else if(firstword.compare("format")) //throw error if endian format
+			}else if(strcmp(firstword.c_str(),"format")==0) //throw error if endian format
 			{
 				secondword=thisline.substr(firstword.length(),thisline.find(" "));
-				if(!firstword.compare("ascii"))
+				if(!strcmp(secondword.c_str(),"ascii"))
 				{
+					ROS_INFO("This may not be an ascii file.");
 					return false;
 				}
-			}
+			} 
 
 			if(whilecounter>=100)
 			{
@@ -293,6 +316,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		}
 		faceCenter.resize(3,numFaces);
 		vertexDist.resize(1,numVertices);
+		vertexMat.resize(3,numVertices);
 
 		/* //example usage DO NOT USE
 		numFaces=10;
@@ -300,19 +324,23 @@ bool mediationLayer::readPLYfile(std::string filename)
 		objectFaces[1].resize(3,numVertices_thisface);
 		*/
 
+		int xx, yy, zz;
+
 		//read in each vertex and ignore color information
 		for(int i=0;i<numVertices;i++)
 		{
 			std::getline(infile, thisline);
 			posIndex=thisline.find(" ");
 			tmp = thisline.substr(0,posIndex);
+			xx=stod(tmp);
 			vertexMat(0,i)=stod(tmp)+zeroCenter(0);
 			posIndex=thisline.find(" ",posIndex+1);
-			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
+			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1)-posIndex);
 			vertexMat(1,i)=stod(tmp)+zeroCenter(1);
+			yy=stod(tmp);
 			
 			//handle end of line
-			posIndex = thisline.find(" ",posIndex+1);
+			int tmpindex = thisline.find(" ",posIndex+1);
 			lastindex = thisline.find(" ",posIndex+1);
 			if(lastindex=std::string::npos)
 			{
@@ -321,11 +349,15 @@ bool mediationLayer::readPLYfile(std::string filename)
 			{
 				tmp = thisline.substr(posIndex,lastindex);
 			}
-			vertexMat(2,i)=stod(tmp)+zeroCenter(2);
+			//tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1)-posIndex);
+			//vertexMat(2,i)=stod(tmp)+zeroCenter(2);
+			zz=stod(tmp);
 		}
 
-		//for each face, do whatever
-		for(int i=0;(i<numFaces && i<100);i++)
+		int prevPosIndex,pos2Index;
+
+		//Doing this with cin is more efficient but encounters the std:cxx__11:str compiler error
+		for(int i=0;(i<numFaces && i<1000);i++)
 		{
 			Eigen::VectorXd objectDistVector;
 			std::getline(infile, thisline);
@@ -337,28 +369,42 @@ bool mediationLayer::readPLYfile(std::string filename)
 			//iterate through object. Do not do last point in case find fails at end of line
 			for(int j=0; j<numPtsThisLine-1; j++) 
 			{
+				tmp = thisline.substr(posIndex+1,thisline.find(" ",posIndex+1)-posIndex-1);
+				prevPosIndex=posIndex; //store previous in case the next is at end-of-line and returns -1
 				posIndex = thisline.find(" ",posIndex+1);
-				tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1));
 				vertexIndex = stoi(tmp);
+				if(vertexIndex>numVertices-1)
+				{
+					ROS_INFO("OVER MAXIMUM VERTEX COUNT");
+					return false;
+				}
 				objectFaces[i](0,j) = vertexMat(0,vertexIndex);
 				objectFaces[i](1,j) = vertexMat(1,vertexIndex);
 				objectFaces[i](2,j) = vertexMat(2,vertexIndex);
 			}
-			//handle last index
+			prevPosIndex=posIndex;
 			posIndex = thisline.find(" ",posIndex+1);
-			lastindex = thisline.find(" ",posIndex+1);
-			if(lastindex=std::string::npos)
+			//handle last index
+			if(posIndex==-1)
 			{
-				tmp = thisline.substr(posIndex,thisline.length());
+				tmp = thisline.substr(prevPosIndex+1,thisline.length()-prevPosIndex);
 			}else
 			{
-				tmp = thisline.substr(posIndex,lastindex);
+				//pos2Index = thisline.find(" ",posIndex+1);
+				tmp = thisline.substr(prevPosIndex+1,posIndex-prevPosIndex-1);
 			}
+			
 			vertexIndex = stoi(tmp);
+			if(vertexIndex>numVertices-1)
+			{
+				ROS_INFO("OVER MAXIMUM VERTEX COUNT");
+				return false;
+			}
 			objectFaces[i](0,numPtsThisLine-1) = vertexMat(0,vertexIndex);
 			objectFaces[i](1,numPtsThisLine-1) = vertexMat(1,vertexIndex);
 			objectFaces[i](2,numPtsThisLine-1) = vertexMat(2,vertexIndex);
 
+			/*
 			//find polygon areas and face vectors
 			tmpmat.setZero();
 			tmpmat.resize(3,numPtsThisLine+1);
@@ -398,7 +444,10 @@ bool mediationLayer::readPLYfile(std::string filename)
 					indexToUseInCalculation.resize(indexToUseInCalculation.size()+1,i);
 				}
 			}
-		}//end FOR (over polygons)
+*/
+
+		}//end FOR (over polygons)  
+		
 	}//end IF
 
 	return true;

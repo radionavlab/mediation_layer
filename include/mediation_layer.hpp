@@ -66,13 +66,14 @@ private:
 
 	int numQuads, numVertices, numFaces;
     double k_forcing, k_forcing_object, k_forcing_point, sizeThresh, minDistThresh;
-    std::string quadPoseTopics[10], quadPVAListenTopics[10], quadPVAPublishTopics[10];
+    std::string quadPoseTopics[10], quadPVAListenTopics[10], quadPVAPublishTopics[10], inFile;
     ros::Subscriber pose_sub_[10], pva_sub_[10];
     ros::Publisher pva_pub_[10];
     quad quadArray[10];
     Eigen::Vector3d zeroCenter;
     Eigen::VectorXd indexToUseInCalculation;
-    Eigen::MatrixXd objectFaces[100], faceAreas, vertexMat, faceCenter, vertexDist;
+    Eigen::MatrixXd objectFaces[100], faceAreas, faceCenter, vertexDist;
+    Eigen::MatrixXd vertexMat; //vertex positions in 3D
     //NOTE: IF RESIZING arenaObjectFaces, change the FOR loop limit in readPLYfile
 };
 
