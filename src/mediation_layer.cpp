@@ -20,6 +20,7 @@ mediationLayer::mediationLayer(ros::NodeHandle &nh)
 		pose_sub_[i] = nh.subscribe(quadPoseTopics[i],10,&mediationLayer::poseCallback, this, ros::TransportHints().tcpNoDelay());
 		pva_sub_[i] = nh.subscribe(quadPVAListenTopics[i],10,&mediationLayer::pvaCallback, this, ros::TransportHints().tcpNoDelay());
 		pva_pub_[i] = nh.advertise<px4_control::PVA>(quadPVAPublishTopics[i], 10);
+		ROS_INFO("pubtopic:%s:",(quadPVAPublishTopics[i]).c_str());
 	}
 
 //	//get initial pose
@@ -44,12 +45,15 @@ void mediationLayer::readROSParameters()
 	ros::param::get(nodeName+"/zeroZ",zeroCenter(2));
 	ros::param::get(nodeName+"/filename", inFile);
 	ROS_INFO("ROS topic: %s", inFile.c_str());
+	Eigen::Vector3d defaultPose;
+	defaultPose(0)=-9001; defaultPose(1)=-9001; defaultPose(2)=-9001;
 	for(int i=0; i<numQuads; i++)
 	{
 		ros::param::get(nodeName+"/quadPoseTopic_"+std::to_string(i+1),quadPoseTopics[i]);
 		ros::param::get(nodeName+"/quadPVAListenTopic_"+std::to_string(i+1),quadPVAListenTopics[i]);
 		ros::param::get(nodeName+"/quadPVAPublishTopic_"+std::to_string(i+1),quadPVAPublishTopics[i]);
-		quadArray[i].setName(i);
+		quadArray[i].setName(i);  //NOTE: setName provides an INDEX, not a STRING
+		quadArray[i].setPose(defaultPose);
 	}
 }
 
@@ -60,21 +64,31 @@ void mediationLayer::poseCallback(const ros::MessageEvent<nav_msgs::Odometry con
 	const nav_msgs::Odometry::ConstPtr& msg = event.getMessage();
 
 	//get topic name in callback by using messageevent syntax
-	std::string publisher_name = event.getPublisherName();
+  	ros::M_string& header = event.getConnectionHeader();
+  	std::string publisher_name = header.at("topic");
+  	publisher_name=publisher_name.substr(1,publisher_name.length());
+	//std::string publisher_name = event.getPublisherName();
 
 	//get quad's name
 	int thisQuadNum = indexOfMatchingString(quadPoseTopics,numQuads,publisher_name);
 
-	//update quad params
-	Eigen::Vector3d tmp;
-	tmp(0)=msg->pose.pose.position.x;
-	tmp(1)=msg->pose.pose.position.y;
-	tmp(2)=msg->pose.pose.position.z;
-	quadArray[thisQuadNum].setPose(tmp);
-	tmp(0)=msg->twist.twist.linear.x;
-	tmp(1)=msg->twist.twist.linear.y;
-	tmp(2)=msg->twist.twist.linear.z;
-	quadArray[thisQuadNum].setVel(tmp);	
+	if(thisQuadNum!=-1)
+	{	//update quad params
+		Eigen::Vector3d tmp;
+		tmp(0)=msg->pose.pose.position.x;
+		tmp(1)=msg->pose.pose.position.y;
+		tmp(2)=msg->pose.pose.position.z;
+		quadArray[thisQuadNum].setPose(tmp);
+		tmp(0)=msg->twist.twist.linear.x;
+		tmp(1)=msg->twist.twist.linear.y;
+		tmp(2)=msg->twist.twist.linear.z;
+		quadArray[thisQuadNum].setVel(tmp);
+	}
+	else
+	{
+		ROS_INFO("Message received on unknown topic");
+	}
+
 }
 
 
@@ -84,128 +98,140 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 	const px4_control::PVA::ConstPtr& msg = event.getMessage();
 
 	//get topic name in callback by using messageevent syntax
-	std::string publisher_name = event.getPublisherName();
+  	ros::M_string& header = event.getConnectionHeader();
+  	std::string publisher_name = header.at("topic");
+  	publisher_name=publisher_name.substr(1,publisher_name.length());
+	//std::string publisher_name = event.getPublisherName();
 
 	//get quad's name
-	int thisQuadNum = indexOfMatchingString(quadPoseTopics,numQuads,publisher_name);
+	int thisQuadNum = indexOfMatchingString(quadPVAListenTopics,numQuads,publisher_name);
 	Eigen::MatrixXd thisMat, Am(3,3);
 
 	//update quad params
-	Eigen::Vector3d thisQuadPose, quad2Pose, netForcing, tempvec, nn, p0, abc, p0pvec;
+	Eigen::Vector3d thisQuadPose, quad2Pose, netForcing, tempvec, nn, p0, abc, p0pvec, v1, v2, v3;
 	thisQuadPose=quadArray[thisQuadNum].getPose();
 	Eigen::VectorXd distvec;
 	Eigen::MatrixXd unitVecs;
-
-	//call ML
-	Eigen::Vector3d  v1, v2, v3;
-	double tt, mindistSquared, productABC, thisDist;
-	netForcing.setZero();
-	//iterate through quads
-	for(int i=0; i<numQuads; i++)
-	{
-		if(i!=thisQuadNum)
-		{
-			//uses inverse square forcing law
-			quad2Pose=quadArray[i].getPose();
-			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01);
-		}
-	}
-
-	//get distance to each vertex in the list; precomputing for efficiency
-	for(int i=0; i<numVertices; i++)
-	{
-		vertexDist(1,i) = pow(thisQuadPose(0)-vertexMat(0,i),2) + pow(thisQuadPose(1)-vertexMat(1,i),2) + pow(thisQuadPose(2)-vertexMat(2,i),2);
-	}
-
 	int i;
 
-	//iterate through objects
-	for(int ij=0; ij<indexToUseInCalculation.size(); ij++)
+	//call ML
+	double tt, mindistSquared, productABC, thisDist;
+	netForcing.setZero();
+
+	if(thisQuadNum!=-1)
 	{
-		i=indexToUseInCalculation(ij);
 		
-		if(faceAreas(i)<sizeThresh) //treat small objects as point masses
+		//iterate through quads
+		for(int i=0; i<numQuads; i++)
 		{
-			quad2Pose(0)=faceCenter(0,i); quad2Pose(1)=faceCenter(1,i); quad2Pose(2)=faceCenter(2,i);
-			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
-		}else //for objects such as walls
-		{
-			distvec.resize(objectFaces[i].cols()-2);
-			thisMat.setZero();
-			thisMat.resize(3,objectFaces[i].cols());
-			thisMat=objectFaces[i];
-			//implement 2D method if too complicated
-
-			//break object into a set of triangles and handle point matching from triangles instead of larger polygons
-			v1(0)=thisMat(0,0); v1(1)=thisMat(1,0); v1(2)=thisMat(2,0);
-			v2(0)=thisMat(0,1); v2(1)=thisMat(1,1); v2(2)=thisMat(2,1);
-
-			for(int j=0; j<thisMat.cols()-2; j++)
+			if(i!=thisQuadNum)
 			{
-				v3(0)=thisMat(0,j+2); v3(1)=thisMat(1,j+2); v3(2)=thisMat(2,j+2);
-				nn=unitVector((v2-v1).cross(v3-v1));
-				tt=nn.dot(v1)-nn.dot(thisQuadPose);
-				p0=thisQuadPose+tt*nn;
-				if(tt>=0 && tt<=1) //if the projection of the quad's pose is inside of the wall
+				//uses inverse square forcing law
+				quad2Pose=quadArray[i].getPose();
+				netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01);
+			}
+		}
+
+		//get distance to each vertex in the list; precomputing for efficiency
+		//Currently not using this but we might so I'll keep the code
+		/*for(int i=0; i<numVertices; i++)
+		{
+			thisVertexDist(1,i) = pow(thisQuadPose(0)-vertexMat(0,i),2) + pow(thisQuadPose(1)-vertexMat(1,i),2) + pow(thisQuadPose(2)-vertexMat(2,i),2);
+		}*/
+
+		//iterate through objects
+		for(int ij=0; ij<indexToUseInCalculation.size(); ij++)
+		{
+			i=indexToUseInCalculation(ij);
+
+			if(faceAreas(i)<sizeThresh) //treat small objects as point masses
+			{
+				quad2Pose(0)=faceCenter(0,i); quad2Pose(1)=faceCenter(1,i); quad2Pose(2)=faceCenter(2,i);
+				netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
+			}else //for objects such as walls
+			{
+				distvec.resize(objectFaces[i].cols()-2);
+				thisMat.setZero();
+				thisMat.resize(3,objectFaces[i].cols());
+				thisMat=objectFaces[i];
+				//implement 2D method if too complicated
+
+				//break object into a set of triangles and handle point matching from triangles instead of larger polygons
+				v1(0)=thisMat(0,0); v1(1)=thisMat(1,0); v1(2)=thisMat(2,0);
+				v2(0)=thisMat(0,1); v2(1)=thisMat(1,1); v2(2)=thisMat(2,1);
+
+				for(int j=0; j<thisMat.cols()-2; j++)
 				{
-					distvec(j)=(thisQuadPose-p0).squaredNorm();
-				}else  //if the projection of the quad's pose is outside of an object, find nearest point/line
-				{  //uses barycentric method for finding nearest point or line segment
-					thisDist=0;
-					Am << v1,v2,v3;
-					abc=Am.inverse()*thisQuadPose;
-					productABC=abc(0)*abc(1)*abc(2);
-					if(productABC>0)  //dist to point
+					v3(0)=thisMat(0,j+2); v3(1)=thisMat(1,j+2); v3(2)=thisMat(2,j+2);
+					nn=unitVector((v2-v1).cross(v3-v1));
+					tt=nn.dot(v1)-nn.dot(thisQuadPose);
+					p0=thisQuadPose+tt*nn;
+					if(tt>=0 && tt<=1) //if the projection of the quad's pose is inside of the wall
 					{
-						if(abc(0)>0)
+						distvec(j)=(thisQuadPose-p0).squaredNorm();
+					}else  //if the projection of the quad's pose is outside of an object, find nearest point/line
+					{  //uses barycentric method for finding nearest point or line segment
+						thisDist=0;
+						Am << v1,v2,v3;
+						abc=Am.inverse()*thisQuadPose;
+						productABC=abc(0)*abc(1)*abc(2);
+						if(productABC>0)  //dist to point
 						{
-							thisDist=(thisQuadPose-v1).squaredNorm();
-						}else if(abc(1)>0)
-						{
-							thisDist=(thisQuadPose-v2).squaredNorm();
+							if(abc(0)>0)
+							{
+								thisDist=(thisQuadPose-v1).squaredNorm();
+							}else if(abc(1)>0)
+							{
+								thisDist=(thisQuadPose-v2).squaredNorm();
+							}else
+							{
+								thisDist=(thisQuadPose-v3).squaredNorm();
+							}
 						}else
 						{
-							thisDist=(thisQuadPose-v3).squaredNorm();
-						}
-					}else
-					{
-						if(abc(0)<0)  //dist to line
-						{
-							thisDist=distSquaredToLine(thisQuadPose,v1,v2);
-						}else if(abc(1)<0)
-						{
-							thisDist=distSquaredToLine(thisQuadPose,v1,v3);
-						}else if(abc(2)<0)
-						{
-							thisDist=distSquaredToLine(thisQuadPose,v2,v3);
+							if(abc(0)<0)  //dist to line
+							{
+								thisDist=distSquaredToLine(thisQuadPose,v1,v2);
+							}else if(abc(1)<0)
+							{
+								thisDist=distSquaredToLine(thisQuadPose,v1,v3);
+							}else if(abc(2)<0)
+							{
+								thisDist=distSquaredToLine(thisQuadPose,v2,v3);
+							}
 						}
 					}
-				}
 
-				//completing 
-				distvec(j)=thisDist;
-				v2=v3;
+					//completing 
+					distvec(j)=thisDist;
+					v2=v3;
+				}
+				mindistSquared=distvec.minCoeff(); //find the closest triangle on the object
+				p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
+				netForcing = netForcing + k_forcing * p0pvec / mindistSquared;
 			}
-			mindistSquared=distvec.minCoeff(); //find the closest triangle on the object
-			p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
-			netForcing = netForcing + k_forcing * p0pvec / mindistSquared;
 		}
+
+		//fill new message by passing on this message with changes
+		px4_control::PVA PVA_Ref_msg;
+		PVA_Ref_msg.yaw = msg->yaw;
+		PVA_Ref_msg.Pos.x = msg->Pos.x;
+		PVA_Ref_msg.Pos.y = msg->Pos.y;
+		PVA_Ref_msg.Pos.z = msg->Pos.z;
+		PVA_Ref_msg.Vel.x = msg->Vel.x;
+		PVA_Ref_msg.Vel.y = msg->Vel.y;
+		PVA_Ref_msg.Vel.z = msg->Vel.z;
+		PVA_Ref_msg.Acc.x = msg->Acc.x + netForcing(0);
+		PVA_Ref_msg.Acc.y = msg->Acc.y + netForcing(1);
+		PVA_Ref_msg.Acc.z = msg->Acc.z + netForcing(2);
+
+		pva_pub_[thisQuadNum].publish(PVA_Ref_msg);
+	}else
+	{
+		ROS_INFO("Message received on unknown topic");
 	}
 
-	//fill new message by passing on this message with changes
-	px4_control::PVA PVA_Ref_msg;
-	PVA_Ref_msg.yaw = msg->yaw;
-	PVA_Ref_msg.Pos.x = msg->Pos.x;
-	PVA_Ref_msg.Pos.y = msg->Pos.y;
-	PVA_Ref_msg.Pos.z = msg->Pos.z;
-	PVA_Ref_msg.Vel.x = msg->Vel.x;
-	PVA_Ref_msg.Vel.y = msg->Vel.y;
-	PVA_Ref_msg.Vel.z = msg->Vel.z;
-	PVA_Ref_msg.Acc.x = msg->Acc.x + netForcing(0);
-	PVA_Ref_msg.Acc.y = msg->Acc.y + netForcing(1);
-	PVA_Ref_msg.Acc.z = msg->Acc.z + netForcing(2);
 
-	pva_pub_[thisQuadNum].publish(PVA_Ref_msg);
 }
 
 
@@ -312,7 +338,6 @@ bool mediationLayer::readPLYfile(std::string filename)
 			}
 		}
 		faceCenter.resize(3,numFaces);
-		vertexDist.resize(1,numVertices);
 		vertexMat.resize(3,numVertices);
 		faceAreas.resize(numFaces);
 
@@ -458,7 +483,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		
 	}//end IF
 
-/*	ROS_INFO("Using indices: %d:%d:%d:%d:%d:%d",indexToUseInCalculation(0),indexToUseInCalculation(1),
+	/*ROS_INFO("Using indices: %d:%d:%d:%d:%d:%d",indexToUseInCalculation(0),indexToUseInCalculation(1),
 		indexToUseInCalculation(2),indexToUseInCalculation(3),indexToUseInCalculation(4),indexToUseInCalculation(5));*/
 
 	return true;
