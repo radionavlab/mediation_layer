@@ -4,7 +4,7 @@
     name="mediation_layer"
     output="screen">
 
-    <param name="kforce_quad" value="0.05"/>
+    <param name="kforce_quad" value="0.001"/>
     <param name="zeroX" value="0.0"/> <!--location of .ply x0 in global frame-->
     <param name="zeroY" value="0.0"/>
     <param name="zeroZ" value="0.0"/>
@@ -12,16 +12,16 @@
     <param name="distThresh" value="0.05"/> <!--size thresh under which to lump objects into a single mass-->
     <param name="numquads" value="2"/>
 
-    <param name="filename" type="string" value="/home/rnl/catkin_ws/src/mediation_layer/mlMeshes/cube.ply"/>
+    <param name="filename" type="string" value="/home/rnl/catkin_ws/src/mediation_layer/mlMeshes/zerocube.ply"/>
 
     <!-- MUST USE GLOBAL FRAME FOR POSE TOPICS -->
     <!-- NOTE: listen and publish topics are numbered from 1-10, NOT from 0-9 -->
     <param name="quadPoseTopic_1" type="string" value="Valkyrie/local_odom"/> 
     <param name="quadPVAListenTopic_1" type="string" value="px4_control/PVA_Ref"/>
-    <param name="quadPVAPublish_1" type="string" value="px4_control/PVA_Ref_2"/>
+    <param name="quadPVAPublishTopic_1" type="string" value="px4_control/PVA_Ref_2"/>
     <param name="quadPoseTopic_2" type="string" value="Dragon/odom"/>
     <param name="quadPVAListenTopic_2" type="string" value="px4_control/PVA_Ref_3"/>
-    <param name="quadPVAPublish_2" type="string" value="px4_control/PVA_Ref_4"/>
+    <param name="quadPVAPublishTopic_2" type="string" value="px4_control/PVA_Ref_4"/>
 
   </node>
 </launch>

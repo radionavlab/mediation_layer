@@ -20,7 +20,9 @@ mediationLayer::mediationLayer(ros::NodeHandle &nh)
 		pose_sub_[i] = nh.subscribe(quadPoseTopics[i],10,&mediationLayer::poseCallback, this, ros::TransportHints().tcpNoDelay());
 		pva_sub_[i] = nh.subscribe(quadPVAListenTopics[i],10,&mediationLayer::pvaCallback, this, ros::TransportHints().tcpNoDelay());
 		pva_pub_[i] = nh.advertise<px4_control::PVA>(quadPVAPublishTopics[i], 10);
-		ROS_INFO("pubtopic:%s:",(quadPVAPublishTopics[i]).c_str());
+		ROS_INFO("Quad %d is listening to topic %s",i+1,(quadPoseTopics[i]).c_str());
+		ROS_INFO("PVA sub topic for index %d: %s",i+1,(quadPVAListenTopics[i]).c_str());
+		ROS_INFO("PVA pub topic for index %d: %s",i+1,(quadPVAPublishTopics[i]).c_str());
 	}
 
 //	//get initial pose
@@ -206,7 +208,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 					distvec(j)=thisDist;
 					v2=v3;
 				}
-				mindistSquared=distvec.minCoeff(); //find the closest triangle on the object
+				mindistSquared=distvec.minCoeff()+0.01; //find the closest triangle on the object
 				p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
 				netForcing = netForcing + k_forcing * p0pvec / mindistSquared;
 			}
