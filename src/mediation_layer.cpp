@@ -5,7 +5,6 @@ mediationLayer::mediationLayer(ros::NodeHandle &nh)
 
 	readROSParameters();
 
-	ROS_INFO(("fname:"+inFile).c_str());
 	bool successvar=readPLYfile(inFile);
 	if(successvar)
 	{
@@ -38,8 +37,6 @@ void mediationLayer::readROSParameters()
     std::string nodeName = ros::this_node::getName();
 	ros::param::get(nodeName+"/numquads", numQuads);
 	ros::param::get(nodeName+"/kforce_quad", k_forcing);
-	ros::param::get(nodeName+"/kforce_object",k_forcing_object);
-	ros::param::get(nodeName+"/kforce_point",k_forcing_point);
 	ros::param::get(nodeName+"/sizeThresh",sizeThresh);
 	ros::param::get(nodeName+"/distThresh",minDistThresh);
 	ros::param::get(nodeName+"/zeroX",zeroCenter(0));
@@ -130,7 +127,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 		if(faceAreas(i)<sizeThresh) //treat small objects as point masses
 		{
 			quad2Pose(0)=faceCenter(0,i); quad2Pose(1)=faceCenter(1,i); quad2Pose(2)=faceCenter(2,i);
-			netForcing = netForcing + k_forcing_point*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
+			netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
 		}else //for objects such as walls
 		{
 			distvec.resize(objectFaces[i].cols()-2);
@@ -191,7 +188,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 			}
 			mindistSquared=distvec.minCoeff(); //find the closest triangle on the object
 			p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
-			netForcing = netForcing + k_forcing_object * p0pvec / mindistSquared;
+			netForcing = netForcing + k_forcing * p0pvec / mindistSquared;
 		}
 	}
 
@@ -261,7 +258,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 	if(!filename.empty());
 	{
 		std::ifstream infile(filename);
-		ROS_INFO(("fname:"+filename).c_str());
+		ROS_INFO(("Reading from file:"+filename).c_str());
 
 		//Read header
 		bool contvar=true;
@@ -317,6 +314,7 @@ bool mediationLayer::readPLYfile(std::string filename)
 		faceCenter.resize(3,numFaces);
 		vertexDist.resize(1,numVertices);
 		vertexMat.resize(3,numVertices);
+		faceAreas.resize(numFaces);
 
 		/* //example usage DO NOT USE
 		numFaces=10;
@@ -324,7 +322,8 @@ bool mediationLayer::readPLYfile(std::string filename)
 		objectFaces[1].resize(3,numVertices_thisface);
 		*/
 
-		int xx, yy, zz;
+		double xx, yy, zz;
+		int prevPosIndex;
 
 		//read in each vertex and ignore color information
 		for(int i=0;i<numVertices;i++)
@@ -333,28 +332,30 @@ bool mediationLayer::readPLYfile(std::string filename)
 			posIndex=thisline.find(" ");
 			tmp = thisline.substr(0,posIndex);
 			xx=stod(tmp);
-			vertexMat(0,i)=stod(tmp)+zeroCenter(0);
-			posIndex=thisline.find(" ",posIndex+1);
-			tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1)-posIndex);
-			vertexMat(1,i)=stod(tmp)+zeroCenter(1);
+			vertexMat(0,i)=stod(tmp);
+			tmp = thisline.substr(posIndex+1,thisline.find(" ",posIndex+1)-posIndex-1);
+			vertexMat(1,i)=stod(tmp);
 			yy=stod(tmp);
+			posIndex=thisline.find(" ",posIndex+1);
+			prevPosIndex=posIndex;  //leapfrog
+			posIndex=thisline.find(" ",posIndex+1);
 			
 			//handle end of line
 			int tmpindex = thisline.find(" ",posIndex+1);
 			lastindex = thisline.find(" ",posIndex+1);
-			if(lastindex=std::string::npos)
+			if(posIndex==-1)
 			{
-				tmp = thisline.substr(posIndex,thisline.length());
+				tmp = thisline.substr(prevPosIndex,thisline.length()-prevPosIndex);
 			}else
 			{
-				tmp = thisline.substr(posIndex,lastindex);
+				tmp = thisline.substr(prevPosIndex,lastindex);
 			}
 			//tmp = thisline.substr(posIndex,thisline.find(" ",posIndex+1)-posIndex);
-			//vertexMat(2,i)=stod(tmp)+zeroCenter(2);
+			vertexMat(2,i)=stod(tmp);
 			zz=stod(tmp);
 		}
 
-		int prevPosIndex,pos2Index;
+		Eigen::VectorXi tempStorageForIndices;
 
 		//Doing this with cin is more efficient but encounters the std:cxx__11:str compiler error
 		for(int i=0;(i<numFaces && i<1000);i++)
@@ -390,7 +391,6 @@ bool mediationLayer::readPLYfile(std::string filename)
 				tmp = thisline.substr(prevPosIndex+1,thisline.length()-prevPosIndex);
 			}else
 			{
-				//pos2Index = thisline.find(" ",posIndex+1);
 				tmp = thisline.substr(prevPosIndex+1,posIndex-prevPosIndex-1);
 			}
 			
@@ -403,8 +403,9 @@ bool mediationLayer::readPLYfile(std::string filename)
 			objectFaces[i](0,numPtsThisLine-1) = vertexMat(0,vertexIndex);
 			objectFaces[i](1,numPtsThisLine-1) = vertexMat(1,vertexIndex);
 			objectFaces[i](2,numPtsThisLine-1) = vertexMat(2,vertexIndex);
+			//ROS_INFO("Vertices:v1:%f: v2:%f: v3:%f:",objectFaces[i](0,numPtsThisLine-1),objectFaces[i](1,numPtsThisLine-1),objectFaces[i](2,numPtsThisLine-1));
 
-			/*
+			
 			//find polygon areas and face vectors
 			tmpmat.setZero();
 			tmpmat.resize(3,numPtsThisLine+1);
@@ -415,7 +416,10 @@ bool mediationLayer::readPLYfile(std::string filename)
 			v1(0)=tmpmat(0,1)-tmpmat(0,0); v1(1)=tmpmat(1,1)-tmpmat(1,0); v1(2)=tmpmat(2,1)-tmpmat(2,0);
 			v2(0)=tmpmat(0,2)-tmpmat(0,0); v2(1)=tmpmat(1,2)-tmpmat(1,0); v2(2)=tmpmat(2,2)-tmpmat(2,0);
 			unitnormal=unitVector(v1.cross(v2));
+			//double thisfacearea=area3D_Polygon(numPtsThisLine,tmpmat,unitnormal);
 			faceAreas(i)=area3D_Polygon(numPtsThisLine,tmpmat,unitnormal);
+	
+			
 			faceCenter(0,i)=(objectFaces[i].row(0)).mean();   //facevector denotes center of face on small objects
 			faceCenter(1,i)=(objectFaces[i].row(1)).mean();
 			faceCenter(2,i)=(objectFaces[i].row(2)).mean();
@@ -423,14 +427,11 @@ bool mediationLayer::readPLYfile(std::string filename)
 			//iterate through all objects currently in ML and add this to the index of indices to process
 			if(i==0) //always add to next index
 			{
-				objectDistVector.resize(1,-1);
+				indexToUseInCalculation.resize(1);
 				indexToUseInCalculation(0)=i;
-			}else if(indexToUseInCalculation.size()==2)  //it is initialized at size 2 for the compiler
-			{
-				indexToUseInCalculation(1)=i;
 			}else
 			{
-				objectDistVector.resize(indexToUseInCalculation.cols(),-1);
+				objectDistVector.resize(indexToUseInCalculation.size());
 				for(int j=0; j<indexToUseInCalculation.size(); j++)
 				{
 					//compare this object to all other objects in .ply
@@ -441,20 +442,30 @@ bool mediationLayer::readPLYfile(std::string filename)
 				if(faceAreas(i)>sizeThresh ||
 						(sqrt(objectDistVector.minCoeff()) > minDistThresh && faceAreas(i)<sizeThresh) )
 				{	
-					indexToUseInCalculation.resize(indexToUseInCalculation.size()+1,i);
+					tempStorageForIndices.resize(indexToUseInCalculation.size());  //temporary storage vector
+					tempStorageForIndices=indexToUseInCalculation;
+					indexToUseInCalculation.resize(indexToUseInCalculation.size()+1);
+
+					for(int k=0;k<tempStorageForIndices.size();k++)
+					{indexToUseInCalculation(k)=tempStorageForIndices(k);}  //refill storage vector
+
+					indexToUseInCalculation(i)=i;
 				}
 			}
-*/
+
 
 		}//end FOR (over polygons)  
 		
 	}//end IF
 
+/*	ROS_INFO("Using indices: %d:%d:%d:%d:%d:%d",indexToUseInCalculation(0),indexToUseInCalculation(1),
+		indexToUseInCalculation(2),indexToUseInCalculation(3),indexToUseInCalculation(4),indexToUseInCalculation(5));*/
+
 	return true;
 }
 
 
-//may encouter issues with referencing pointers, need to dereference this
+//may encounter issues with referencing pointers, need to dereference this
 Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
 {
 	int numcols;

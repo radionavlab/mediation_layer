@@ -5,13 +5,11 @@
     output="screen">
 
     <param name="kforce_quad" value="0.05"/>
-    <param name="kforce_object" value="0.05"/>
-    <param name="kforce_point" value="0.001"/>
-    <param name="zeroX" value="0.001"/> <!--location of .ply x0 in global frame-->
-    <param name="zeroY" value="0.001"/>
-    <param name="zeroZ" value="0.001"/>
-    <param name="sizeThresh" value="0.25"/> <!--objects smaller than sizethresh are treated as point masses-->
-    <param name="distThresh" value="0.25"/> <!--size thresh under which to lump objects into a single mass-->
+    <param name="zeroX" value="0.0"/> <!--location of .ply x0 in global frame-->
+    <param name="zeroY" value="0.0"/>
+    <param name="zeroZ" value="0.0"/>
+    <param name="sizeThresh" value="0.05"/> <!--objects smaller than sizethresh are treated as point masses-->
+    <param name="distThresh" value="0.05"/> <!--size thresh under which to lump objects into a single mass-->
     <param name="numquads" value="2"/>
 
     <param name="filename" type="string" value="/home/rnl/catkin_ws/src/mediation_layer/mlMeshes/cube.ply"/>
