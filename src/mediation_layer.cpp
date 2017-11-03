@@ -110,10 +110,11 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 	Eigen::MatrixXd thisMat, Am(3,3);
 
 	//update quad params
-	Eigen::Vector3d thisQuadPose, quad2Pose, netForcing, tempvec, nn, p0, abc, p0pvec, v1, v2, v3;
+	Eigen::Vector3d thisQuadPose, quad2Pose, netForcing, tempvec, p0, p0pvec,  v1, v2, v3;
 	thisQuadPose=quadArray[thisQuadNum].getPose();
 	Eigen::VectorXd distvec;
-	Eigen::MatrixXd unitVecs;
+	Eigen::MatrixXd unitVecs, p0mat;
+	Eigen::Matrix3d trianglemat;
 	int i;
 
 	//call ML
@@ -141,6 +142,9 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 			thisVertexDist(1,i) = pow(thisQuadPose(0)-vertexMat(0,i),2) + pow(thisQuadPose(1)-vertexMat(1,i),2) + pow(thisQuadPose(2)-vertexMat(2,i),2);
 		}*/
 
+		int minIndex;
+		minIndex=0;
+
 		//iterate through objects
 		for(int ij=0; ij<indexToUseInCalculation.size(); ij++)
 		{
@@ -152,6 +156,7 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 				netForcing = netForcing + k_forcing*unitVector(thisQuadPose-quad2Pose) / ((thisQuadPose-quad2Pose).squaredNorm()+.01+sizeThresh);
 			}else //for objects such as walls
 			{
+				p0mat.resize(3,objectFaces[i].cols()-2);
 				distvec.resize(objectFaces[i].cols()-2);
 				thisMat.setZero();
 				thisMat.resize(3,objectFaces[i].cols());
@@ -165,51 +170,18 @@ void mediationLayer::pvaCallback(const ros::MessageEvent<px4_control::PVA const>
 				for(int j=0; j<thisMat.cols()-2; j++)
 				{
 					v3(0)=thisMat(0,j+2); v3(1)=thisMat(1,j+2); v3(2)=thisMat(2,j+2);
-					nn=unitVector((v2-v1).cross(v3-v1));
-					tt=nn.dot(v1)-nn.dot(thisQuadPose);
-					p0=thisQuadPose+tt*nn;
-					if(tt>=0 && tt<=1) //if the projection of the quad's pose is inside of the wall
-					{
-						distvec(j)=(thisQuadPose-p0).squaredNorm();
-					}else  //if the projection of the quad's pose is outside of an object, find nearest point/line
-					{  //uses barycentric method for finding nearest point or line segment
-						thisDist=0;
-						Am << v1,v2,v3;
-						abc=Am.inverse()*thisQuadPose;
-						productABC=abc(0)*abc(1)*abc(2);
-						if(productABC>0)  //dist to point
-						{
-							if(abc(0)>0)
-							{
-								thisDist=(thisQuadPose-v1).squaredNorm();
-							}else if(abc(1)>0)
-							{
-								thisDist=(thisQuadPose-v2).squaredNorm();
-							}else
-							{
-								thisDist=(thisQuadPose-v3).squaredNorm();
-							}
-						}else
-						{
-							if(abc(0)<0)  //dist to line
-							{
-								thisDist=distSquaredToLine(thisQuadPose,v1,v2);
-							}else if(abc(1)<0)
-							{
-								thisDist=distSquaredToLine(thisQuadPose,v1,v3);
-							}else if(abc(2)<0)
-							{
-								thisDist=distSquaredToLine(thisQuadPose,v2,v3);
-							}
-						}
-					}
+					trianglemat.col(0)=v1; trianglemat.col(1)=v2; trianglemat.col(2)=v3;
+					p0=closestPointOnTriangle(trianglemat,thisQuadPose);
 
-					//completing 
-					distvec(j)=thisDist;
+					//completing surface iteration
+					p0mat(0,j)=p0(0); p0mat(1,j)=p0(1); p0mat(2,j)=p0(2);
+					distvec(j)=(p0-thisQuadPose).squaredNorm();
 					v2=v3;
 				}
-				mindistSquared=distvec.minCoeff()+0.01; //find the closest triangle on the object
+				mindistSquared=distvec.minCoeff(&minIndex)+0.01; //find the closest triangle on the object
+				p0(0)=p0mat(0,minIndex); p0(1)=p0mat(1,minIndex); p0(2)=p0mat(2,minIndex); 
 				p0pvec = unitVector(thisQuadPose-p0); //can be calculated on last iteration since all points are coplanar
+				//ROS_INFO("ind:%d has dist %f at (%f,%f,%f)",ij,mindistSquared,p0(0),p0(1),p0(2));
 				netForcing = netForcing + k_forcing * p0pvec / mindistSquared;
 			}
 		}
@@ -279,6 +251,249 @@ m1[1].setVertex(1,.2,.2,.2);
 Eigen::MatrixXd m2(2,3);
 m2=m1[1].returnPointMatrix();
 */
+
+
+//may encounter issues with referencing pointers, need to dereference this
+Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
+{
+	int numcols;
+	numcols=inmat.cols();
+
+	//vector work to rotate to the origin
+	Eigen::Vector3d origin, localx, localy, localz, unitx, unity, unitz, tmpvec;
+	origin(0)=inmat(0,0); origin(1)=inmat(1,0); origin(2)=inmat(2,0);
+	localx(0)=inmat(0,1)-inmat(0,0); localx(1)=inmat(1,1)-inmat(1,0); localx(2)=inmat(2,1)-inmat(2,0);
+	unitx = unitVector(localx);
+	tmpvec(0)=inmat(0,2)-inmat(0,0); tmpvec(1)=inmat(1,2)-inmat(1,0); tmpvec(2)=inmat(2,2)-inmat(2,0);
+	localz = tmpvec.cross(localx);
+	unitz = unitVector(localz);
+	unity = unitz.cross(unitx);
+
+	//create transformation matrix
+	Eigen::MatrixXd Tmat(4,4);
+	Tmat.setZero();
+	Tmat(0,0)=unitx(0); Tmat(1,0)=unitx(1); Tmat(2,0)=unitx(2);
+	Tmat(0,1)=unity(0); Tmat(1,1)=unity(1); Tmat(2,1)=unity(2);
+	Tmat(0,2)=unitz(0); Tmat(1,2)=unitz(1); Tmat(2,2)=unitz(2);
+	Tmat(0,3)=origin(0); Tmat(1,3)=origin(1); Tmat(2,3)=origin(2); 
+	Tmat(3,3)=1;
+
+	Eigen::MatrixXd Cmat(4,inmat.cols());
+	Cmat.setOnes();
+	Cmat.topRows(3)=inmat;
+	Cmat=(Tmat.inverse()*Cmat.transpose()).transpose();
+	
+	return Cmat.topRows(3);
+}
+
+
+// http://geomalgorithms.com/a01-_area.html#2D%20Polygons
+double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d &vecNormal)
+{
+	//vecNormal is a normal vector to the plane
+	//pointmat is a 3 x n+1 matrix of points, with the initial point copied to the last point
+    double area = 0;
+    float an, ax, ay, az; // abs value of normal and its coords
+    int  coord;           // coord to ignore: 1=x, 2=y, 3=z
+    int  i, j, k;         // loop indices
+
+    if (n < 3) return 0;  // a degenerate polygon
+
+    // select largest abs coordinate to ignore for projection
+    ax = (vecNormal(0)>0 ? vecNormal(0) : -vecNormal(0));    // abs x-coord
+    ay = (vecNormal(1)>0 ? vecNormal(1) : -vecNormal(1));    // abs y-coord
+    az = (vecNormal(2)>0 ? vecNormal(2) : -vecNormal(2));    // abs z-coord
+
+    coord = 3;                    // ignore z-coord
+    if (ax > ay) {
+        if (ax > az) coord = 1;   // ignore x-coord
+    }
+    else if (ay > az) coord = 2;  // ignore y-coord
+
+    // compute area of the 2D projection
+    switch (coord) {
+      case 1:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(1,i) * (pointmat(2,j) - pointmat(2,k)));
+        break;
+      case 2:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(2,i) * (pointmat(0,j) - pointmat(0,k)));
+        break;
+      case 3:
+        for (i=1, j=2, k=0; i<n; i++, j++, k++)
+            area += (pointmat(0,i) * (pointmat(1,j) - pointmat(1,k)));
+        break;
+    }
+    switch (coord) {    // wrap-around term
+      case 1:
+        area += (pointmat(1,n) * (pointmat(2,1) - pointmat(2,n-1)));
+        break;
+      case 2:
+        area += (pointmat(2,n) * (pointmat(0,1) - pointmat(0,n-1)));
+        break;
+      case 3:
+        area += (pointmat(0,n) * (pointmat(1,1) - pointmat(1,n-1)));
+        break;
+    }
+
+    // scale to get area before projection
+    an = sqrt( ax*ax + ay*ay + az*az); // length of normal vector
+    switch (coord) {
+      case 1:
+        area *= (an / (2 * (vecNormal(0))));
+        break;
+      case 2:
+        area *= (an / (2 * (vecNormal(1))));
+        break;
+      case 3:
+        area *= (an / (2 * (vecNormal(2))));
+    }
+    return area;
+}
+
+double mediationLayer::distSquaredToLine(Eigen::Vector3d &p,Eigen::Vector3d &v1, Eigen::Vector3d &v2)
+{
+	Eigen::Vector3d M;
+	double t0;
+	t0 = M.dot((p) - (v1))/M.dot(M);
+	M=(v2)-(v1);
+	if(t0<=0)
+	{
+		return ((p)-(v1)).squaredNorm();
+	}else if(t0<1)
+	{
+		return ((p)-((v1)+t0*M)).squaredNorm();
+	}else
+	{
+		return ((p)-((v1)+M)).squaredNorm();
+	}
+}
+
+
+//see https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+Eigen::Vector3d mediationLayer::closestPointOnTriangle( const Eigen::Matrix3d triangle, const Eigen::Vector3d sourcePosition)
+{
+    Eigen::Vector3d edge0 = triangle.col(1) - triangle.col(0);
+    Eigen::Vector3d edge1 = triangle.col(2) - triangle.col(0);
+    Eigen::Vector3d v0 = triangle.col(0) - sourcePosition;
+
+    float a = edge0.dot( edge0 );
+    float b = edge0.dot( edge1 );
+    float c = edge1.dot( edge1 );
+    float d = edge0.dot( v0 );
+    float e = edge1.dot( v0 );
+
+    float det = a*c - b*b;
+    float s = b*e - c*d;
+    float t = b*d - a*e;
+
+    if ( s + t < det )
+    {
+        if ( s < 0.f )
+        {
+            if ( t < 0.f )
+            {
+                if ( d < 0.f )
+                {
+                    s = clamp( -d/a, 0.f, 1.f );
+                    t = 0.f;
+                }
+                else
+                {
+                    s = 0.f;
+                    t = clamp( -e/c, 0.f, 1.f );
+                }
+            }
+            else
+            {
+                s = 0.f;
+                t = clamp( -e/c, 0.f, 1.f );
+            }
+        }
+        else if ( t < 0.f )
+        {
+            s = clamp( -d/a, 0.f, 1.f );
+            t = 0.f;
+        }
+        else
+        {
+            float invDet = 1.f / det;
+            s *= invDet;
+            t *= invDet;
+        }
+    }
+    else
+    {
+        if ( s < 0.f )
+        {
+            float tmp0 = b+d;
+            float tmp1 = c+e;
+            if ( tmp1 > tmp0 )
+            {
+                float numer = tmp1 - tmp0;
+                float denom = a-2*b+c;
+                s = clamp( numer/denom, 0.f, 1.f );
+                t = 1-s;
+            }
+            else
+            {
+                t = clamp( -e/c, 0.f, 1.f );
+                s = 0.f;
+            }
+        }
+        else if ( t < 0.f )
+        {
+            if ( a+d > b+e )
+            {
+                float numer = c+e-b-d;
+                float denom = a-2*b+c;
+                s = clamp( numer/denom, 0.f, 1.f );
+                t = 1-s;
+            }
+            else
+            {
+                s = clamp( -e/c, 0.f, 1.f );
+                t = 0.f;
+            }
+        }
+        else
+        {
+            float numer = c+e-b-d;
+            float denom = a-2*b+c;
+            s = clamp( numer/denom, 0.f, 1.f );
+            t = 1.f - s;
+        }
+    }
+
+    return triangle.col(0) + s * edge0 + t * edge1;
+}
+
+//NOTE: catkin_make currently uses c++11; clamp is part of std in c++17
+double mediationLayer::clamp(double v0, double lo, double hi)
+{
+	if(v0<lo)
+	{	return lo;}
+	else if(v0>hi)
+	{	return hi;}
+	else
+	{	return v0;}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 //returns false on error
 bool mediationLayer::readPLYfile(std::string filename)
@@ -490,123 +705,3 @@ bool mediationLayer::readPLYfile(std::string filename)
 
 	return true;
 }
-
-
-//may encounter issues with referencing pointers, need to dereference this
-Eigen::MatrixXd mediationLayer::rotatePolygonTo2D(Eigen::MatrixXd &inmat)
-{
-	int numcols;
-	numcols=inmat.cols();
-
-	//vector work to rotate to the origin
-	Eigen::Vector3d origin, localx, localy, localz, unitx, unity, unitz, tmpvec;
-	origin(0)=inmat(0,0); origin(1)=inmat(1,0); origin(2)=inmat(2,0);
-	localx(0)=inmat(0,1)-inmat(0,0); localx(1)=inmat(1,1)-inmat(1,0); localx(2)=inmat(2,1)-inmat(2,0);
-	unitx = unitVector(localx);
-	tmpvec(0)=inmat(0,2)-inmat(0,0); tmpvec(1)=inmat(1,2)-inmat(1,0); tmpvec(2)=inmat(2,2)-inmat(2,0);
-	localz = tmpvec.cross(localx);
-	unitz = unitVector(localz);
-	unity = unitz.cross(unitx);
-
-	//create transformation matrix
-	Eigen::MatrixXd Tmat(4,4);
-	Tmat.setZero();
-	Tmat(0,0)=unitx(0); Tmat(1,0)=unitx(1); Tmat(2,0)=unitx(2);
-	Tmat(0,1)=unity(0); Tmat(1,1)=unity(1); Tmat(2,1)=unity(2);
-	Tmat(0,2)=unitz(0); Tmat(1,2)=unitz(1); Tmat(2,2)=unitz(2);
-	Tmat(0,3)=origin(0); Tmat(1,3)=origin(1); Tmat(2,3)=origin(2); 
-	Tmat(3,3)=1;
-
-	Eigen::MatrixXd Cmat(4,inmat.cols());
-	Cmat.setOnes();
-	Cmat.topRows(3)=inmat;
-	Cmat=(Tmat.inverse()*Cmat.transpose()).transpose();
-	
-	return Cmat.topRows(3);
-}
-
-
-// http://geomalgorithms.com/a01-_area.html#2D%20Polygons
-double mediationLayer::area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d &vecNormal)
-{
-	//vecNormal is a normal vector to the plane
-	//pointmat is a 3 x n+1 matrix of points, with the initial point copied to the last point
-    double area = 0;
-    float an, ax, ay, az; // abs value of normal and its coords
-    int  coord;           // coord to ignore: 1=x, 2=y, 3=z
-    int  i, j, k;         // loop indices
-
-    if (n < 3) return 0;  // a degenerate polygon
-
-    // select largest abs coordinate to ignore for projection
-    ax = (vecNormal(0)>0 ? vecNormal(0) : -vecNormal(0));    // abs x-coord
-    ay = (vecNormal(1)>0 ? vecNormal(1) : -vecNormal(1));    // abs y-coord
-    az = (vecNormal(2)>0 ? vecNormal(2) : -vecNormal(2));    // abs z-coord
-
-    coord = 3;                    // ignore z-coord
-    if (ax > ay) {
-        if (ax > az) coord = 1;   // ignore x-coord
-    }
-    else if (ay > az) coord = 2;  // ignore y-coord
-
-    // compute area of the 2D projection
-    switch (coord) {
-      case 1:
-        for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(1,i) * (pointmat(2,j) - pointmat(2,k)));
-        break;
-      case 2:
-        for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(2,i) * (pointmat(0,j) - pointmat(0,k)));
-        break;
-      case 3:
-        for (i=1, j=2, k=0; i<n; i++, j++, k++)
-            area += (pointmat(0,i) * (pointmat(1,j) - pointmat(1,k)));
-        break;
-    }
-    switch (coord) {    // wrap-around term
-      case 1:
-        area += (pointmat(1,n) * (pointmat(2,1) - pointmat(2,n-1)));
-        break;
-      case 2:
-        area += (pointmat(2,n) * (pointmat(0,1) - pointmat(0,n-1)));
-        break;
-      case 3:
-        area += (pointmat(0,n) * (pointmat(1,1) - pointmat(1,n-1)));
-        break;
-    }
-
-    // scale to get area before projection
-    an = sqrt( ax*ax + ay*ay + az*az); // length of normal vector
-    switch (coord) {
-      case 1:
-        area *= (an / (2 * (vecNormal(0))));
-        break;
-      case 2:
-        area *= (an / (2 * (vecNormal(1))));
-        break;
-      case 3:
-        area *= (an / (2 * (vecNormal(2))));
-    }
-    return area;
-}
-
-double mediationLayer::distSquaredToLine(Eigen::Vector3d &p,Eigen::Vector3d &v1, Eigen::Vector3d &v2)
-{
-	Eigen::Vector3d M;
-	double t0;
-	t0 = M.dot((p) - (v1))/M.dot(M);
-	M=(v2)-(v1);
-	if(t0<=0)
-	{
-		return ((p)-(v1)).squaredNorm();
-	}else if(t0<1)
-	{
-		return ((p)-((v1)+t0*M)).squaredNorm();
-	}else
-	{
-		return ((p)-((v1)+M)).squaredNorm();
-	}
-}
-
-

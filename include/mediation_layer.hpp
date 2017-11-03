@@ -56,6 +56,9 @@ public:
     bool readPLYfile(std::string filename);
     double area3D_Polygon( int n, Eigen::MatrixXd &pointmat,Eigen::Vector3d &vecNormal);
     double distSquaredToLine(Eigen::Vector3d &p,Eigen::Vector3d &v1, Eigen::Vector3d &v2);
+    Eigen::Vector3d closestPointOnTriangle( const Eigen::Matrix3d triangle, const Eigen::Vector3d sourcePosition);
+    double clamp(double v0, double lo, double hi);
+
 
 private:
 
